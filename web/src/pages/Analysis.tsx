@@ -3,6 +3,7 @@ import FilterBar from "../components/FilterBar";
 import Table, { Column } from "../components/Table";
 import { api } from "../api/client";
 import { useFilter } from "../hooks/useFilter";
+import { useRefreshTick } from "../lib/refresh";
 import { formatCost, formatNumber, pct } from "../lib/utils";
 import type { UsageAggregationRow, UsageAnalysis } from "../api/types";
 
@@ -39,6 +40,7 @@ export default function AnalysisPage() {
   const [data, setData] = useState<UsageAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const tick = useRefreshTick();
 
   useEffect(() => {
     let cancelled = false;
@@ -58,7 +60,7 @@ export default function AnalysisPage() {
     return () => {
       cancelled = true;
     };
-  }, [filter]);
+  }, [filter, tick]);
 
   const apiCols: Column<UsageAggregationRow>[] = [
     {

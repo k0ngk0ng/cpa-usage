@@ -3,6 +3,7 @@ import FilterBar from "../components/FilterBar";
 import Table, { Column } from "../components/Table";
 import { api } from "../api/client";
 import { useFilter } from "../hooks/useFilter";
+import { useRefreshTick } from "../lib/refresh";
 import { formatNumber, pct } from "../lib/utils";
 import type { UsageCredentialStat } from "../api/types";
 
@@ -11,6 +12,7 @@ export default function CredentialsPage() {
   const [rows, setRows] = useState<UsageCredentialStat[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const tick = useRefreshTick();
 
   useEffect(() => {
     let cancelled = false;
@@ -30,7 +32,7 @@ export default function CredentialsPage() {
     return () => {
       cancelled = true;
     };
-  }, [filter]);
+  }, [filter, tick]);
 
   const cols: Column<UsageCredentialStat>[] = [
     {

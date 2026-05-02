@@ -3,6 +3,7 @@ import { Link, NavLink } from "react-router-dom";
 import { api } from "../api/client";
 import type { DrainStatus } from "../api/types";
 import { formatRelative, isZeroTime } from "../lib/utils";
+import { REFRESH_INTERVALS, RefreshInterval, useRefresh } from "../lib/refresh";
 import clsx from "clsx";
 
 const NAV = [
@@ -22,24 +23,22 @@ interface Props {
 
 export default function Layout({ children, authRequired, onLogout }: Props) {
   const [status, setStatus] = useState<DrainStatus | null>(null);
+  const { tick } = useRefresh();
 
   useEffect(() => {
     let cancelled = false;
-    const tick = async () => {
+    (async () => {
       try {
         const s = await api.status();
         if (!cancelled) setStatus(s);
       } catch {
         /* ignore */
       }
-    };
-    tick();
-    const id = window.setInterval(tick, 15_000);
+    })();
     return () => {
       cancelled = true;
-      window.clearInterval(id);
     };
-  }, []);
+  }, [tick]);
 
   const drainHealthy =
     status &&
@@ -72,6 +71,7 @@ export default function Layout({ children, authRequired, onLogout }: Props) {
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-4 text-xs text-muted">
+            <RefreshControl />
             <DrainBadge status={status} healthy={!!drainHealthy} />
             {authRequired && (
               <button
@@ -87,6 +87,33 @@ export default function Layout({ children, authRequired, onLogout }: Props) {
       <main className="flex-1">
         <div className="max-w-[1400px] mx-auto px-6 py-6">{children}</div>
       </main>
+    </div>
+  );
+}
+
+function RefreshControl() {
+  const { intervalSeconds, setIntervalSeconds, refreshNow } = useRefresh();
+  return (
+    <div className="flex items-center gap-1.5">
+      <button
+        onClick={refreshNow}
+        title="Refresh now"
+        className="px-2 py-1 rounded-md border border-border hover:bg-panel2 hover:text-ink"
+      >
+        ↻
+      </button>
+      <select
+        value={intervalSeconds}
+        onChange={(e) => setIntervalSeconds(Number(e.target.value) as RefreshInterval)}
+        className="bg-panel2 border border-border rounded-md px-2 py-1"
+        title="Auto-refresh interval"
+      >
+        {REFRESH_INTERVALS.map((n) => (
+          <option key={n} value={n}>
+            {n === 0 ? "auto: off" : `auto: ${n}s`}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }

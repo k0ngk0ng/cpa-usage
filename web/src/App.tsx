@@ -8,6 +8,7 @@ import Events from "./pages/Events";
 import Credentials from "./pages/Credentials";
 import Pricing from "./pages/Pricing";
 import AuthFiles from "./pages/AuthFiles";
+import { RefreshProvider } from "./lib/refresh";
 
 export default function App() {
   const { session, loading, login, logout, refresh } = useSession();
@@ -25,22 +26,24 @@ export default function App() {
   }
 
   return (
-    <Layout
-      authRequired={!!session?.auth_required}
-      onLogout={async () => {
-        await logout();
-        await refresh();
-      }}
-    >
-      <Routes>
-        <Route path="/" element={<Overview />} />
-        <Route path="/analysis" element={<Analysis />} />
-        <Route path="/events" element={<Events />} />
-        <Route path="/credentials" element={<Credentials />} />
-        <Route path="/pricing" element={<Pricing />} />
-        <Route path="/auth-files" element={<AuthFiles />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </Layout>
+    <RefreshProvider>
+      <Layout
+        authRequired={!!session?.auth_required}
+        onLogout={async () => {
+          await logout();
+          await refresh();
+        }}
+      >
+        <Routes>
+          <Route path="/" element={<Overview />} />
+          <Route path="/analysis" element={<Analysis />} />
+          <Route path="/events" element={<Events />} />
+          <Route path="/credentials" element={<Credentials />} />
+          <Route path="/pricing" element={<Pricing />} />
+          <Route path="/auth-files" element={<AuthFiles />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Layout>
+    </RefreshProvider>
   );
 }

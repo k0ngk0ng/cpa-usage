@@ -5,6 +5,7 @@ import MetricCard from "../components/MetricCard";
 import SeriesChart from "../components/SeriesChart";
 import { api } from "../api/client";
 import { useFilter } from "../hooks/useFilter";
+import { useRefreshTick } from "../lib/refresh";
 import { formatCost, formatNumber, formatTokens, pct } from "../lib/utils";
 import type { UsageOverview } from "../api/types";
 
@@ -13,6 +14,7 @@ export default function Overview() {
   const [data, setData] = useState<UsageOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const tick = useRefreshTick();
 
   useEffect(() => {
     let cancelled = false;
@@ -32,7 +34,7 @@ export default function Overview() {
     return () => {
       cancelled = true;
     };
-  }, [filter]);
+  }, [filter, tick]);
 
   const summary = data?.summary;
   const useDaily = filter.range === "7d" || filter.range === "all";

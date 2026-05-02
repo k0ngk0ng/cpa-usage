@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import clsx from "clsx";
 import Table, { Column } from "../components/Table";
 import { api } from "../api/client";
+import { useRefreshTick } from "../lib/refresh";
 import type { AuthFile, ProviderMetadata } from "../api/types";
 
 export default function AuthFilesPage() {
@@ -10,6 +11,7 @@ export default function AuthFilesPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const tick = useRefreshTick();
 
   const reload = async () => {
     setLoading(true);
@@ -27,7 +29,7 @@ export default function AuthFilesPage() {
 
   useEffect(() => {
     reload();
-  }, []);
+  }, [tick]);
 
   const triggerSync = async () => {
     setSyncing(true);

@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import Table, { Column } from "../components/Table";
 import { api, HttpError } from "../api/client";
+import { useRefreshTick } from "../lib/refresh";
 import { formatTimestamp } from "../lib/utils";
 import type { ModelPriceSetting } from "../api/types";
 
@@ -25,6 +26,7 @@ export default function PricingPage() {
   const [err, setErr] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [submitting, setSubmitting] = useState(false);
+  const tick = useRefreshTick();
 
   const reload = async () => {
     setLoading(true);
@@ -42,7 +44,7 @@ export default function PricingPage() {
 
   useEffect(() => {
     reload();
-  }, []);
+  }, [tick]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
