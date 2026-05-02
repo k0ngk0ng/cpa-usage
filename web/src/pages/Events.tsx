@@ -3,6 +3,7 @@ import FilterBar from "../components/FilterBar";
 import Table, { Column } from "../components/Table";
 import { api } from "../api/client";
 import { useFilter } from "../hooks/useFilter";
+import { useRefreshTick } from "../lib/refresh";
 import { formatCost, formatLatency, formatNumber, formatTimestamp } from "../lib/utils";
 import type { UsageEventRecord, UsageEventsPage } from "../api/types";
 
@@ -15,6 +16,7 @@ export default function EventsPage() {
   const [data, setData] = useState<UsageEventsPage | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const tick = useRefreshTick();
 
   // Reset to page 1 when filter changes.
   useEffect(() => {
@@ -39,12 +41,13 @@ export default function EventsPage() {
     return () => {
       cancelled = true;
     };
-  }, [filter, page, pageSize]);
+  }, [filter, page, pageSize, tick]);
 
   const cols: Column<UsageEventRecord>[] = [
-    { header: "Time", cell: (r) => <span className="font-mono text-xs">{formatTimestamp(r.timestamp)}</span> },
+    { header: "Time", cellClassName: "whitespace-nowrap", cell: (r) => <span className="font-mono">{formatTimestamp(r.timestamp)}</span> },
     {
       header: "Result",
+      cellClassName: "whitespace-nowrap",
       cell: (r) =>
         r.failed ? (
           <span className="text-danger">FAIL</span>
@@ -52,33 +55,44 @@ export default function EventsPage() {
           <span className="text-success">OK</span>
         ),
     },
-    { header: "Model", cell: (r) => <span className="font-mono text-xs">{r.model}</span> },
+    { header: "Model", cellClassName: "font-mono whitespace-nowrap", cell: (r) => r.model },
     {
       header: "API",
+      cellClassName: "max-w-[14rem]",
       cell: (r) => (
-        <div>
-          <div>{r.api_group_display || r.api_group_key}</div>
+        <div className="truncate" title={r.api_group_key}>
+          <div className="truncate">{r.api_group_display || r.api_group_key}</div>
           {r.api_group_display && r.api_group_display !== r.api_group_key && (
-            <div className="text-[11px] text-muted font-mono">{r.api_group_key}</div>
+            <div className="text-[10px] text-muted font-mono truncate">{r.api_group_key}</div>
           )}
         </div>
       ),
     },
     {
       header: "Source",
+      sticky: "left",
+      cellClassName: "max-w-[12rem]",
       cell: (r) => (
-        <div>
-          <div>{r.source_display || r.source}</div>
-          {r.auth_index && <div className="text-[11px] text-muted font-mono">#{r.auth_index}</div>}
+        <div className="truncate" title={r.source}>
+          <div className="truncate">{r.source_display || r.source}</div>
+          {r.auth_index && <div className="text-[10px] text-muted font-mono">#{r.auth_index}</div>}
         </div>
       ),
     },
-    { header: "Endpoint", cell: (r) => <span className="text-xs">{r.endpoint}</span> },
-    { header: "Latency", align: "right", cell: (r) => formatLatency(r.latency_ms) },
-    { header: "Input", align: "right", cell: (r) => formatNumber(r.input_tokens) },
-    { header: "Output", align: "right", cell: (r) => formatNumber(r.output_tokens) },
-    { header: "Cached", align: "right", cell: (r) => formatNumber(r.cached_tokens) },
-    { header: "Cost", align: "right", cell: (r) => formatCost(r.cost) },
+    {
+      header: "Endpoint",
+      cellClassName: "max-w-[12rem]",
+      cell: (r) => (
+        <span className="block truncate" title={r.endpoint}>
+          {r.endpoint}
+        </span>
+      ),
+    },
+    { header: "Latency", align: "right", cellClassName: "whitespace-nowrap", cell: (r) => formatLatency(r.latency_ms) },
+    { header: "Input", align: "right", cellClassName: "whitespace-nowrap", cell: (r) => formatNumber(r.input_tokens) },
+    { header: "Output", align: "right", cellClassName: "whitespace-nowrap", cell: (r) => formatNumber(r.output_tokens) },
+    { header: "Cached", align: "right", cellClassName: "whitespace-nowrap", cell: (r) => formatNumber(r.cached_tokens) },
+    { header: "Cost", align: "right", cellClassName: "whitespace-nowrap", cell: (r) => formatCost(r.cost) },
   ];
 
   return (
