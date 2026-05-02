@@ -1,19 +1,22 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/k0ngk0ng/cpa-usage/internal/cpa"
 	"github.com/k0ngk0ng/cpa-usage/internal/storage"
 	"github.com/k0ngk0ng/cpa-usage/internal/usage"
 )
 
 // UsageDeps wires the usage handlers to the service layer.
 type UsageDeps struct {
-	Service *usage.Service
+	Service   *usage.Service
+	LogReader *cpa.LogReader
 }
 
 func parseFilterFromQuery(c *gin.Context) (usage.Filter, error) {
@@ -107,5 +110,34 @@ func usageCredentialsHandler(deps UsageDeps) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"items": out})
+	}
+}
+
+// usageEventLogHandler reads the CPA per-request log file matching
+// :request_id and returns the user-facing portions only (REQUEST INFO,
+// HEADERS, REQUEST BODY, final RESPONSE — no upstream API REQUEST/RESPONSE
+// rounds).
+func usageEventLogHandler(deps UsageDeps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.LogReader == nil || deps.LogReader.Dir == "" {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "CPA_LOG_DIR is not configured"})
+			return
+		}
+		requestID := c.Param("request_id")
+		path, err := deps.LogReader.FindLog(requestID)
+		if err != nil {
+			if errors.Is(err, cpa.ErrLogNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"found": false})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		entry, err := deps.LogReader.Read(path)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"found": true, "entry": entry})
 	}
 }

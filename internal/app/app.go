@@ -105,7 +105,7 @@ func New(cfg *config.Config, build BuildInfo) (*App, error) {
 			BasePath:   cfg.AppBasePath,
 			Sessions:   sessions,
 		},
-		Usage:   api.UsageDeps{Service: usageSvc},
+		Usage:   api.UsageDeps{Service: usageSvc, LogReader: &cpa.LogReader{Dir: cfg.CPALogDir}},
 		Pricing: api.PricingDeps{Service: priceSvc},
 		Meta: api.MetaDeps{
 			Store:   store,

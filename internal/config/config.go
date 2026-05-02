@@ -36,6 +36,8 @@ type Config struct {
 	LogDir       string
 	LogRetention int
 
+	CPALogDir string
+
 	AuthEnabled    bool
 	LoginPassword  string
 	SessionTTL     time.Duration
@@ -60,8 +62,9 @@ func Load() (*Config, error) {
 		TZ:                strOr("TZ", "Asia/Shanghai"),
 		LogLevel:          strOr("LOG_LEVEL", "info"),
 		LogFile:           boolOr("LOG_FILE_ENABLED", true),
-		LogDir:            strOr("LOG_DIR", "/var/lib/cpa-usage/logs"),
+		LogDir:            strOr("LOG_DIR", "./logs"),
 		LogRetention:      intOr("LOG_RETENTION_DAYS", 7),
+		CPALogDir:         strOr("CPA_LOG_DIR", "/home/cliproxy/logs"),
 		AuthEnabled:       boolOr("AUTH_ENABLED", false),
 		LoginPassword:     os.Getenv("LOGIN_PASSWORD"),
 		SessionTTL:        durationOr("AUTH_SESSION_TTL", 168*time.Hour),
