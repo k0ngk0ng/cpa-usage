@@ -1,0 +1,9 @@
+/server
+/cpa-usage
+/dist/
+*.db
+*.db-shm
+*.db-wal
+.env
+.idea/
+.vscode/

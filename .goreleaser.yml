@@ -1,0 +1,48 @@
+version: 2
+
+before:
+  hooks:
+    - sh -c "cd web && npm ci && npm run build"
+    - go mod tidy
+
+builds:
+  - id: cpa-usage
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    main: ./cmd/server/
+    binary: cpa-usage
+    ldflags:
+      - -s -w
+      - -X 'main.Version={{.Version}}'
+      - -X 'main.Commit={{.ShortCommit}}'
+      - -X 'main.BuildDate={{.Date}}'
+
+archives:
+  - id: cpa-usage
+    format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{- if eq .Arch "arm64" -}}aarch64{{- else -}}{{ .Arch }}{{- end -}}
+    files:
+      - LICENSE
+      - README.md
+      - .env.example
+      - cpa-usage-install.sh
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  name_template: '{{ incpatch .Version }}-next'
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
