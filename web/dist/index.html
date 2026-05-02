@@ -6,9 +6,18 @@
     <title>CPA Usage</title>
     <script>
       // Replaced server-side at request time by internal/api/render_index.go.
-      // In dev (vite) it stays as the literal string and the api client falls
-      // back to "/usage".
-      window.__APP_BASE_PATH__ = "__APP_BASE_PATH__";
+      // In dev (vite) the literal survives and the api client falls back to
+      // "/usage". The <base> tag is injected via document.write so that it
+      // lands BEFORE Vite's auto-inserted <script src="./assets/..."> — that
+      // way relative asset URLs resolve under APP_BASE_PATH regardless of the
+      // current URL (deep refresh on /usage/events doesn't break loading).
+      (function () {
+        var bp = "__APP_BASE_PATH__";
+        if (bp && bp !== "__APP_" + "BASE_PATH__") {
+          document.write('<base href="' + bp + '/">');
+        }
+        window.__APP_BASE_PATH__ = bp;
+      })();
     </script>
     <script type="module" crossorigin src="./assets/index-CMkRg7Vq.js"></script>
     <link rel="stylesheet" crossorigin href="./assets/index-DE-boUBp.css">
