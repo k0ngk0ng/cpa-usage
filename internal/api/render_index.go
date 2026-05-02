@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"net/http"
 	"path"
@@ -16,12 +17,31 @@ import (
 // indexPlaceholder is the literal token replaced at runtime with the basePath.
 const indexPlaceholder = `"__APP_BASE_PATH__"`
 
+// devPlaceholderHTML is served when web/dist/index.html is missing — i.e. the
+// SPA bundle has not been built yet. This keeps `go build` working from a
+// fresh clone without forcing a Node toolchain on every dev cycle.
+const devPlaceholderHTML = `<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><title>cpa-usage</title>
+<style>body{font:14px/1.5 system-ui,sans-serif;max-width:48rem;margin:3rem auto;padding:0 1rem;color:#333}code{background:#f4f4f5;padding:.1em .35em;border-radius:.25rem}</style>
+</head><body>
+<h1>cpa-usage</h1>
+<p>The SPA bundle is not embedded. Build it once before running the server:</p>
+<pre><code>cd web &amp;&amp; npm ci &amp;&amp; npm run build</code></pre>
+<p>Release builds run this automatically via goreleaser.</p>
+</body></html>
+`
+
 // renderIndex reads dist/index.html from the embedded FS and substitutes the
 // runtime base path placeholder so the SPA can build correct asset URLs.
+// If the SPA has not been built (dist/index.html missing), returns a static
+// placeholder page instead of an error.
 func renderIndex(basePath string) ([]byte, error) {
 	embedded := web.FS()
 	raw, err := fs.ReadFile(embedded, "dist/index.html")
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return []byte(devPlaceholderHTML), nil
+		}
 		return nil, err
 	}
 	encoded, err := json.Marshal(basePath)

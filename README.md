@@ -18,6 +18,12 @@ CPA v6.10 removed the legacy `/v0/management/usage/{export,import}` HTTP endpoin
 ```bash
 cd github.com/k0ngk0ng/cpa-usage
 go mod tidy
+
+# Build the SPA bundle once — the Go binary embeds web/dist/, but the
+# directory is .gitignored. Releases run this automatically via goreleaser;
+# locally you need to do it yourself before `go build`.
+(cd web && npm ci && npm run build)
+
 go build ./cmd/server
 
 CPA_BASE_URL=http://127.0.0.1:8317 \

@@ -1,7 +1,6 @@
 node_modules/
-dist/assets/
-dist/*.js
-dist/*.css
+dist/*
+!dist/.gitkeep
 .vite/
 *.tsbuildinfo
 vite.config.js
