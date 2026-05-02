@@ -8,10 +8,17 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// BuildInfo carries the cpa-usage build identifiers (injected via -ldflags).
+type BuildInfo struct {
+	Version   string
+	Commit    string
+	BuildDate string
+}
+
 // RouterConfig describes everything the router needs at startup.
 type RouterConfig struct {
 	BasePath string
-	Version  string
+	Build    BuildInfo
 	Logger   *logrus.Logger
 
 	Auth    AuthDeps
@@ -38,7 +45,8 @@ func New(cfg RouterConfig) *gin.Engine {
 		api := base.Group("/api/v1")
 		{
 			// Public auth endpoints
-			api.GET("/ping", pingHandler(cfg.Version))
+			api.GET("/ping", pingHandler(cfg.Build.Version))
+			api.GET("/version", versionHandler(cfg.Build, cfg.Meta))
 			api.GET("/auth/session", sessionHandler(cfg.Auth))
 			api.POST("/auth/login", loginHandler(cfg.Auth))
 			api.POST("/auth/logout", logoutHandler(cfg.Auth))

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -15,6 +16,18 @@ type Client struct {
 	baseURL       string
 	managementKey string
 	httpClient    *http.Client
+
+	versionMu sync.RWMutex
+	version   VersionInfo
+}
+
+// VersionInfo holds the most recently observed CPA build metadata, captured
+// from the X-CPA-VERSION / X-CPA-COMMIT / X-CPA-BUILD-DATE headers that CPA
+// stamps on every management response.
+type VersionInfo struct {
+	Version   string
+	Commit    string
+	BuildDate string
 }
 
 // NewClient builds a Client for the given CPA base URL and management key.
@@ -28,6 +41,28 @@ func NewClient(baseURL, managementKey string, timeout time.Duration) *Client {
 
 // BaseURL exposes the CPA base URL (used by callers that derive the redis address).
 func (c *Client) BaseURL() string { return c.baseURL }
+
+// Version returns the most recently observed CPA build metadata. Empty fields
+// mean we haven't successfully called a management endpoint yet.
+func (c *Client) Version() VersionInfo {
+	c.versionMu.RLock()
+	defer c.versionMu.RUnlock()
+	return c.version
+}
+
+func (c *Client) recordVersion(h http.Header) {
+	v := VersionInfo{
+		Version:   strings.TrimSpace(h.Get("X-CPA-VERSION")),
+		Commit:    strings.TrimSpace(h.Get("X-CPA-COMMIT")),
+		BuildDate: strings.TrimSpace(h.Get("X-CPA-BUILD-DATE")),
+	}
+	if v == (VersionInfo{}) {
+		return
+	}
+	c.versionMu.Lock()
+	c.version = v
+	c.versionMu.Unlock()
+}
 
 // FetchAuthFiles returns the management auth-files snapshot.
 func (c *Client) FetchAuthFiles(ctx context.Context) ([]AuthFile, error) {
@@ -128,6 +163,7 @@ func (c *Client) getJSON(ctx context.Context, path string, target any, configure
 		return fmt.Errorf("request %s: %w", path, err)
 	}
 	defer resp.Body.Close()
+	c.recordVersion(resp.Header)
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("read %s body: %w", path, err)

@@ -1,7 +1,7 @@
 import { ReactNode, useEffect, useState } from "react";
 import { Link, NavLink } from "react-router-dom";
 import { api } from "../api/client";
-import type { DrainStatus } from "../api/types";
+import type { DrainStatus, VersionInfo } from "../api/types";
 import { formatRelative, isZeroTime } from "../lib/utils";
 import { REFRESH_INTERVALS, RefreshInterval, useRefresh } from "../lib/refresh";
 import clsx from "clsx";
@@ -23,6 +23,7 @@ interface Props {
 
 export default function Layout({ children, authRequired, onLogout }: Props) {
   const [status, setStatus] = useState<DrainStatus | null>(null);
+  const [version, setVersion] = useState<VersionInfo | null>(null);
   const { tick } = useRefresh();
 
   useEffect(() => {
@@ -31,6 +32,21 @@ export default function Layout({ children, authRequired, onLogout }: Props) {
       try {
         const s = await api.status();
         if (!cancelled) setStatus(s);
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tick]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const v = await api.version();
+        if (!cancelled) setVersion(v);
       } catch {
         /* ignore */
       }
@@ -87,8 +103,38 @@ export default function Layout({ children, authRequired, onLogout }: Props) {
       <main className="flex-1">
         <div className="max-w-[1400px] mx-auto px-6 py-6">{children}</div>
       </main>
+      <Footer version={version} />
     </div>
   );
+}
+
+function Footer({ version }: { version: VersionInfo | null }) {
+  const ours = version?.cpa_usage;
+  const cpa = version?.cpa;
+  const ourLabel = formatBuild(ours);
+  const cpaLabel = formatBuild(cpa);
+  return (
+    <footer className="border-t border-border bg-panel">
+      <div className="max-w-[1400px] mx-auto px-6 py-2 flex items-center gap-4 text-[11px] text-muted">
+        <span>
+          cpa-usage <span className="font-mono text-ink">{ourLabel || "dev"}</span>
+        </span>
+        <span className="text-border">·</span>
+        <span>
+          cpa <span className="font-mono text-ink">{cpaLabel || "—"}</span>
+        </span>
+      </div>
+    </footer>
+  );
+}
+
+function formatBuild(b?: { version: string; commit: string }) {
+  if (!b) return "";
+  const v = (b.version || "").trim();
+  const c = (b.commit || "").trim();
+  if (v && v !== "dev") return v;
+  if (c) return c.slice(0, 7);
+  return v;
 }
 
 function RefreshControl() {

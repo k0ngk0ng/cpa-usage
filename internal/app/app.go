@@ -92,8 +92,12 @@ func New(cfg *config.Config, build BuildInfo) (*App, error) {
 
 	router := api.New(api.RouterConfig{
 		BasePath: cfg.AppBasePath,
-		Version:  build.Version,
-		Logger:   logger,
+		Build: api.BuildInfo{
+			Version:   build.Version,
+			Commit:    build.Commit,
+			BuildDate: build.BuildDate,
+		},
+		Logger: logger,
 		Auth: api.AuthDeps{
 			Enabled:    cfg.AuthEnabled,
 			Password:   cfg.LoginPassword,

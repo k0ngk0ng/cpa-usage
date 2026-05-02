@@ -11,6 +11,7 @@ import type {
   UsageEventFilterOptions,
   UsageEventsPage,
   UsageOverview,
+  VersionInfo,
 } from "./types";
 
 // Resolve the API base URL once. The Go renderer substitutes
@@ -106,6 +107,9 @@ export const api = {
   },
   async sync(): Promise<{ ok: boolean }> {
     return request("/sync", { method: "POST" });
+  },
+  async version(): Promise<VersionInfo> {
+    return request<VersionInfo>("/version");
   },
 
   async overview(filter: Filter): Promise<UsageOverview> {

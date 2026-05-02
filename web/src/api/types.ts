@@ -191,3 +191,14 @@ export interface DrainStatus {
   total_decode_errors: number;
   batches_popped: number;
 }
+
+export interface BuildStamp {
+  version: string;
+  commit: string;
+  build_date: string;
+}
+
+export interface VersionInfo {
+  cpa_usage: BuildStamp;
+  cpa: BuildStamp;
+}
