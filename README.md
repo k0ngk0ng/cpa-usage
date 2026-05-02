@@ -28,24 +28,24 @@ LOG_FILE_ENABLED=false \
 ./server
 
 # In another shell:
-curl http://127.0.0.1:8080/healthz
-curl 'http://127.0.0.1:8080/usage/api/v1/usage/overview?range=24h' | jq
+curl http://127.0.0.1:8318/healthz
+curl 'http://127.0.0.1:8318/usage/api/v1/usage/overview?range=24h' | jq
 ```
 
 ## Production install (Linux, systemd)
 
-GitHub Releases ship a `cpa-usage_<version>_linux_<arch>.tar.gz` archive (`amd64` and `aarch64`). The accompanying installer creates a `cpausage` system user, drops the binary under `/home/cpausage/cpa-usage/releases/<ver>`, and writes a systemd unit:
+GitHub Releases ship a `cpa-usage_<version>_linux_<arch>.tar.gz` archive (`amd64` and `aarch64`). The accompanying installer reuses the `cliproxy` system user that the CPA installer creates (so cpa-usage and CPA share state under `/home/cliproxy`), drops the binary under `/home/cliproxy/cpa-usage/releases/<ver>`, and writes a systemd unit:
 
 ```bash
 sudo ./cpa-usage-install.sh --version 0.0.1-0
 ```
 
-After install, edit `/home/cpausage/cpa-usage/.env` to populate `CPA_BASE_URL` and `CPA_MANAGEMENT_KEY`, then:
+After install, edit `/home/cliproxy/cpa-usage/.env` to populate `CPA_BASE_URL` and `CPA_MANAGEMENT_KEY`, then:
 
 ```bash
 sudo systemctl restart cpa-usage
 journalctl -u cpa-usage -f
-curl http://127.0.0.1:8080/usage/healthz
+curl http://127.0.0.1:8318/usage/healthz
 ```
 
 ## Configuration
@@ -56,7 +56,7 @@ All configuration is via environment variables (also see `.env.example`):
 |---|---|---|
 | `CPA_BASE_URL` | — | Required |
 | `CPA_MANAGEMENT_KEY` | — | Required |
-| `APP_PORT` | `8080` | |
+| `APP_PORT` | `8318` | |
 | `APP_BASE_PATH` | `/usage` | Set to `""` for root mount |
 | `TZ` | `Asia/Shanghai` | Drives "today" boundary + 03:00 cleanup |
 | `STORAGE_DRIVER` | `sqlite` | Only `sqlite` in v1 |

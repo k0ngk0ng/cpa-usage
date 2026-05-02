@@ -4,8 +4,11 @@ set -euo pipefail
 # ==========
 # Defaults
 # ==========
-APP_USER="cpausage"
-APP_GROUP="cpausage"
+# We reuse the `cliproxy` system user that the CPA install script creates.
+# This way cpa-usage and CPA share a uid and the .env / data dirs sit alongside
+# CPA's own state under /home/cliproxy.
+APP_USER="cliproxy"
+APP_GROUP="cliproxy"
 HOME_DIR="/home/${APP_USER}"
 BASE_DIR="${HOME_DIR}/cpa-usage"
 RELEASES_DIR="${BASE_DIR}/releases"
@@ -20,7 +23,7 @@ UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 # ==========
 # Configurable
 # ==========
-APP_PORT_DEFAULT="8080"
+APP_PORT_DEFAULT="8318"
 APP_BASE_PATH_DEFAULT="/usage"
 HEALTH_CHECK_TIMEOUT="${HEALTH_CHECK_TIMEOUT:-60}"
 DOWNLOAD_BASE="${DOWNLOAD_BASE:-https://github.com/k0ngk0ng/cpa-usage/releases/download}"
@@ -81,12 +84,17 @@ ensure_user() {
   if id "${APP_USER}" >/dev/null 2>&1; then
     return 0
   fi
+  # The cliproxy user is normally created by the CPA installer. If it's
+  # missing, create it with the same shape so cpa-usage can stand alone.
+  echo "==> Create system user: ${APP_USER}"
   useradd -r -m -d "${HOME_DIR}" -s /bin/bash "${APP_USER}"
 }
 
 ensure_dirs() {
-  mkdir -p "${RELEASES_DIR}" "${DATA_DIR}" "${LOGS_DIR}"
-  chown -R "${APP_USER}:${APP_GROUP}" "${HOME_DIR}"
+  # Only touch the cpa-usage subtree; do NOT chown -R the whole home directory,
+  # because /home/cliproxy is owned by CPA and contains its config/state.
+  mkdir -p "${BASE_DIR}" "${RELEASES_DIR}" "${DATA_DIR}" "${LOGS_DIR}"
+  chown -R "${APP_USER}:${APP_GROUP}" "${BASE_DIR}"
   chmod 750 "${BASE_DIR}" || true
 }
 
