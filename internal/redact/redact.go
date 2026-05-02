@@ -30,8 +30,12 @@ func APIAlias(value string) string {
 }
 
 // DisplayName masks a credential string for display, preserving a few leading
-// and trailing characters so operators can disambiguate keys at a glance.
+// and trailing characters so operators can disambiguate keys at a glance. The
+// middle is always rendered with a fixed number of asterisks regardless of the
+// secret's true length, to avoid visually leaking the size and to keep tables
+// from being dominated by long mask runs.
 func DisplayName(value string) string {
+	const middleStars = 4
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" || trimmed == "unknown" {
 		return "unknown"
@@ -42,8 +46,8 @@ func DisplayName(value string) string {
 	}
 	if count <= 8 {
 		runes := []rune(trimmed)
-		return string(runes[:1]) + strings.Repeat("*", count-2) + string(runes[count-1:])
+		return string(runes[:1]) + strings.Repeat("*", middleStars) + string(runes[count-1:])
 	}
 	runes := []rune(trimmed)
-	return string(runes[:4]) + strings.Repeat("*", count-8) + string(runes[count-4:])
+	return string(runes[:4]) + strings.Repeat("*", middleStars) + string(runes[count-4:])
 }
