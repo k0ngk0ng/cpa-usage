@@ -82,7 +82,6 @@ export default function SeriesChart({ data, granularity, height = 280 }: Props) 
             stroke="#4ade80"
             fill="url(#g-success)"
             strokeWidth={2}
-            stackId="1"
           />
           <Area
             type="monotone"
@@ -90,7 +89,6 @@ export default function SeriesChart({ data, granularity, height = 280 }: Props) 
             stroke="#f87171"
             fill="url(#g-failed)"
             strokeWidth={2}
-            stackId="1"
           />
         </AreaChart>
       </ResponsiveContainer>
