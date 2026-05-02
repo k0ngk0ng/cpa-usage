@@ -68,39 +68,39 @@ func (c *Client) FetchModels(ctx context.Context) ([]ModelInfo, error) {
 
 // FetchGeminiKeys returns the gemini provider catalog.
 func (c *Client) FetchGeminiKeys(ctx context.Context) ([]ProviderKeyConfig, error) {
-	return c.fetchProviderKeyConfig(ctx, managementGeminiKeysEndpoint)
+	return c.fetchProviderKeyConfig(ctx, managementGeminiKeysEndpoint, "gemini-api-key")
 }
 
 // FetchClaudeKeys returns the claude provider catalog.
 func (c *Client) FetchClaudeKeys(ctx context.Context) ([]ProviderKeyConfig, error) {
-	return c.fetchProviderKeyConfig(ctx, managementClaudeKeysEndpoint)
+	return c.fetchProviderKeyConfig(ctx, managementClaudeKeysEndpoint, "claude-api-key")
 }
 
 // FetchCodexKeys returns the codex provider catalog.
 func (c *Client) FetchCodexKeys(ctx context.Context) ([]ProviderKeyConfig, error) {
-	return c.fetchProviderKeyConfig(ctx, managementCodexKeysEndpoint)
+	return c.fetchProviderKeyConfig(ctx, managementCodexKeysEndpoint, "codex-api-key")
 }
 
 // FetchVertexKeys returns the vertex provider catalog.
 func (c *Client) FetchVertexKeys(ctx context.Context) ([]ProviderKeyConfig, error) {
-	return c.fetchProviderKeyConfig(ctx, managementVertexKeysEndpoint)
+	return c.fetchProviderKeyConfig(ctx, managementVertexKeysEndpoint, "vertex-api-key")
 }
 
 // FetchOpenAICompatibility returns the openai-compatible provider catalog.
 func (c *Client) FetchOpenAICompatibility(ctx context.Context) ([]OpenAICompatibilityConfig, error) {
-	var resp []OpenAICompatibilityConfig
+	resp := map[string][]OpenAICompatibilityConfig{}
 	if err := c.getManagement(ctx, managementOpenAICompatEndpoint, &resp); err != nil {
 		return nil, err
 	}
-	return resp, nil
+	return resp["openai-compatibility"], nil
 }
 
-func (c *Client) fetchProviderKeyConfig(ctx context.Context, path string) ([]ProviderKeyConfig, error) {
-	var resp []ProviderKeyConfig
+func (c *Client) fetchProviderKeyConfig(ctx context.Context, path, envelopeKey string) ([]ProviderKeyConfig, error) {
+	resp := map[string][]ProviderKeyConfig{}
 	if err := c.getManagement(ctx, path, &resp); err != nil {
 		return nil, err
 	}
-	return resp, nil
+	return resp[envelopeKey], nil
 }
 
 func (c *Client) getManagement(ctx context.Context, path string, target any) error {
