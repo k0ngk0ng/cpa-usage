@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"html"
 	"io/fs"
 	"net/http"
 	"path"
@@ -14,8 +16,13 @@ import (
 	"github.com/k0ngk0ng/cpa-usage/web"
 )
 
-// indexPlaceholder is the literal token replaced at runtime with the basePath.
+// indexPlaceholder is the JS literal token replaced with the base path.
 const indexPlaceholder = `"__APP_BASE_PATH__"`
+
+// baseTagPlaceholder is replaced with a literal <base> tag at request time.
+// It lives in the HTML head BEFORE any asset references so the browser's
+// speculative preload sees the right base for relative URLs (./assets/...).
+const baseTagPlaceholder = `<!--__BASE_TAG__-->`
 
 // devPlaceholderHTML is served when web/dist/index.html is missing — i.e. the
 // SPA bundle has not been built yet. This keeps `go build` working from a
@@ -48,7 +55,13 @@ func renderIndex(basePath string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return bytes.ReplaceAll(raw, []byte(indexPlaceholder), encoded), nil
+	out := bytes.ReplaceAll(raw, []byte(indexPlaceholder), encoded)
+	baseTag := ""
+	if basePath != "" {
+		baseTag = fmt.Sprintf(`<base href="%s/">`, html.EscapeString(basePath))
+	}
+	out = bytes.ReplaceAll(out, []byte(baseTagPlaceholder), []byte(baseTag))
+	return out, nil
 }
 
 // distFS returns a sub-filesystem rooted at dist/ for static asset serving.
