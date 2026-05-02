@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import FilterBar from "../components/FilterBar";
 import Table, { Column } from "../components/Table";
+import EventLogModal from "../components/EventLogModal";
 import { api } from "../api/client";
 import { useFilter } from "../hooks/useFilter";
 import { useRefreshTick } from "../lib/refresh";
@@ -16,6 +17,7 @@ export default function EventsPage() {
   const [data, setData] = useState<UsageEventsPage | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [selected, setSelected] = useState<UsageEventRecord | null>(null);
   const tick = useRefreshTick();
 
   // Reset to page 1 when filter changes.
@@ -44,16 +46,34 @@ export default function EventsPage() {
   }, [filter, page, pageSize, tick]);
 
   const cols: Column<UsageEventRecord>[] = [
-    { header: "Time", cellClassName: "whitespace-nowrap", cell: (r) => <span className="font-mono">{formatTimestamp(r.timestamp)}</span> },
     {
-      header: "Result",
+      header: "Time",
       cellClassName: "whitespace-nowrap",
-      cell: (r) =>
-        r.failed ? (
-          <span className="text-danger">FAIL</span>
-        ) : (
-          <span className="text-success">OK</span>
-        ),
+      cell: (r) => {
+        const d = r.timestamp ? new Date(r.timestamp) : null;
+        const ok = d && !Number.isNaN(d.getTime());
+        const date = ok ? `${String(d!.getMonth() + 1).padStart(2, "0")}-${String(d!.getDate()).padStart(2, "0")}` : "—";
+        const time = ok ? `${String(d!.getHours()).padStart(2, "0")}:${String(d!.getMinutes()).padStart(2, "0")}:${String(d!.getSeconds()).padStart(2, "0")}` : "";
+        return (
+          <div title={ok ? formatTimestamp(r.timestamp) : ""}>
+            <div className="text-[10px] text-muted">{date}</div>
+            <div className="font-mono">{time}</div>
+            {r.request_id && (
+              <div className="text-[10px] text-muted font-mono">{r.request_id}</div>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      header: "",
+      cellClassName: "whitespace-nowrap w-3",
+      cell: (r) => (
+        <span
+          title={r.failed ? "Failed" : "Success"}
+          className={`inline-block w-2 h-2 rounded-full ${r.failed ? "bg-danger" : "bg-success"}`}
+        />
+      ),
     },
     { header: "Model", cellClassName: "font-mono whitespace-nowrap", cell: (r) => r.model },
     {
@@ -110,6 +130,7 @@ export default function EventsPage() {
         rowKey={(r) => r.event_key || r.request_id}
         loading={loading && !data}
         empty="No events match the current filter."
+        onRowClick={(r) => r.request_id && setSelected(r)}
       />
 
       <Pagination
@@ -123,6 +144,10 @@ export default function EventsPage() {
           setPage(1);
         }}
       />
+
+      {selected && (
+        <EventLogModal event={selected} onClose={() => setSelected(null)} />
+      )}
     </div>
   );
 }

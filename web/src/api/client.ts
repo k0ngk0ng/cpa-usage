@@ -1,6 +1,7 @@
 import type {
   AuthFile,
   DrainStatus,
+  EventLogResponse,
   Filter,
   ModelPriceSetting,
   PricingUpsertRequest,
@@ -127,6 +128,18 @@ export const api = {
     return request<UsageEventFilterOptions>(
       "/usage/events/filters" + buildQuery(filter),
     );
+  },
+  async eventLog(requestId: string): Promise<EventLogResponse> {
+    try {
+      return await request<EventLogResponse>(
+        "/usage/events/" + encodeURIComponent(requestId) + "/log",
+      );
+    } catch (e) {
+      if (e instanceof HttpError && e.status === 404) {
+        return { found: false };
+      }
+      throw e;
+    }
   },
   async credentials(filter: Filter): Promise<{ items: UsageCredentialStat[] }> {
     return request<{ items: UsageCredentialStat[] }>(

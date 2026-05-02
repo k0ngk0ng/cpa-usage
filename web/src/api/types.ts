@@ -202,3 +202,18 @@ export interface VersionInfo {
   cpa_usage: BuildStamp;
   cpa: BuildStamp;
 }
+
+export interface EventLogEntry {
+  file: string;
+  info: Record<string, string>;
+  headers: Record<string, string>;
+  request_body: string;
+  request_body_truncated: boolean;
+  response_body: string;
+  response_body_truncated: boolean;
+}
+
+export interface EventLogResponse {
+  found: boolean;
+  entry?: EventLogEntry;
+}

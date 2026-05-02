@@ -16,9 +16,10 @@ interface Props<T> {
   rowKey: (row: T) => string;
   empty?: ReactNode;
   loading?: boolean;
+  onRowClick?: (row: T) => void;
 }
 
-export default function Table<T>({ columns, rows, rowKey, empty, loading }: Props<T>) {
+export default function Table<T>({ columns, rows, rowKey, empty, loading, onRowClick }: Props<T>) {
   return (
     <div className="bg-panel border border-border rounded-lg overflow-hidden">
       <div className="overflow-x-auto">
@@ -59,7 +60,14 @@ export default function Table<T>({ columns, rows, rowKey, empty, loading }: Prop
             )}
             {!loading &&
               rows.map((row) => (
-                <tr key={rowKey(row)} className="group hover:bg-panel2/60">
+                <tr
+                  key={rowKey(row)}
+                  className={clsx(
+                    "group hover:bg-panel2/60",
+                    onRowClick && "cursor-pointer",
+                  )}
+                  onClick={onRowClick ? () => onRowClick(row) : undefined}
+                >
                   {columns.map((c, i) => (
                     <td
                       key={i}
