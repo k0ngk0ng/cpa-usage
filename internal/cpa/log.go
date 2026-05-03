@@ -28,11 +28,14 @@ type LogReader struct {
 // APIResponse captures one upstream attempt's response (status + headers +
 // body). Multiple entries appear when CPA retried the upstream call; the
 // final RESPONSE section (the bytes returned to the caller) is reported
-// separately on LogEntry.
+// separately on LogEntry. Error is set when CPA never received a response —
+// e.g. transport-level "EOF" or timeout — in which case Status/Headers/Body
+// stay zero-valued.
 type APIResponse struct {
 	Index         int               `json:"index"`
 	Timestamp     string            `json:"timestamp,omitempty"`
 	Status        int               `json:"status,omitempty"`
+	Error         string            `json:"error,omitempty"`
 	Headers       map[string]string `json:"headers"`
 	Body          string            `json:"body"`
 	BodyTruncated bool              `json:"body_truncated"`
@@ -246,6 +249,12 @@ func (r *LogReader) Read(path string) (*LogEntry, error) {
 									currentResp.Status, _ = strconv.Atoi(strings.TrimSpace(v))
 								case "Timestamp":
 									currentResp.Timestamp = v
+								case "Error":
+									if currentResp.Error == "" {
+										currentResp.Error = v
+									} else {
+										currentResp.Error += "\n" + v
+									}
 								}
 							}
 						case respSubHeaders:

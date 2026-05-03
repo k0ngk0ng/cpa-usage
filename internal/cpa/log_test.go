@@ -76,6 +76,43 @@ func TestFindLogInvalidRequestID(t *testing.T) {
 	}
 }
 
+// TestLogReaderTransportError verifies that an upstream attempt that never
+// produced a response (CPA writes only "Error: ... EOF" with no Status /
+// Headers / Body) still appears in APIResponses with Error populated, so the
+// UI surfaces the failed attempt instead of silently dropping it.
+func TestLogReaderTransportError(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home dir: %v", err)
+	}
+	sampleDir := filepath.Join(home, "Downloads", "logs")
+	if _, err := os.Stat(sampleDir); err != nil {
+		t.Skipf("sample dir not present: %v", err)
+	}
+	r := &LogReader{Dir: sampleDir}
+	path, err := r.FindLog("33f40551")
+	if err != nil {
+		t.Skipf("sample log 33f40551 not available: %v", err)
+	}
+	entry, err := r.Read(path)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(entry.APIResponses) < 1 {
+		t.Fatalf("expected at least 1 APIResponse, got %d", len(entry.APIResponses))
+	}
+	first := entry.APIResponses[0]
+	if first.Index != 1 {
+		t.Errorf("first.Index = %d, want 1", first.Index)
+	}
+	if first.Status != 0 {
+		t.Errorf("first.Status = %d, want 0 (no upstream response)", first.Status)
+	}
+	if !strings.Contains(first.Error, "EOF") {
+		t.Errorf("first.Error = %q, want it to mention EOF", first.Error)
+	}
+}
+
 // TestLogReaderMultipleAPIResponses verifies that retried upstream attempts
 // (multiple `=== API RESPONSE N ===` blocks) are parsed into APIResponses
 // with their per-attempt status code, so the UI can distinguish a 429-then-

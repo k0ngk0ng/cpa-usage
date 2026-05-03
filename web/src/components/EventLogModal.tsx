@@ -214,12 +214,13 @@ function buildTabs(entry: EventLogEntry | null): Tab[] {
   });
 
   for (const r of entry.api_responses || []) {
+    let badge: Tab["badge"];
+    if (r.status) badge = { text: String(r.status), tone: statusTone(r.status) };
+    else if (r.error) badge = { text: "ERR", tone: "danger" };
     tabs.push({
       id: `api-${r.index}`,
       label: `Response ${r.index}`,
-      badge: r.status
-        ? { text: String(r.status), tone: statusTone(r.status) }
-        : undefined,
+      badge,
       render: () => <APIResponseTab attempt={r} />,
     });
   }
@@ -244,6 +245,8 @@ function APIResponseTab({ attempt }: { attempt: APIResponseAttempt }) {
   const meta: Record<string, string> = {};
   if (attempt.timestamp) meta.Timestamp = attempt.timestamp;
   if (attempt.status) meta.Status = String(attempt.status);
+  const hasHeaders = Object.keys(attempt.headers || {}).length > 0;
+  const hasBody = (attempt.body || "").trim().length > 0;
   return (
     <Panel>
       {Object.keys(meta).length > 0 && (
@@ -252,21 +255,33 @@ function APIResponseTab({ attempt }: { attempt: APIResponseAttempt }) {
           <KVList map={meta} />
         </div>
       )}
-      <div className="mb-3">
-        <Label>Headers</Label>
-        <KVList map={attempt.headers} />
-      </div>
-      <div>
-        <Label>
-          Body
-          {attempt.body_truncated && (
-            <span className="ml-2 text-warn text-[10px] uppercase tracking-wider">
-              truncated
-            </span>
-          )}
-        </Label>
-        <BodyView raw={attempt.body} kind="response" />
-      </div>
+      {attempt.error && (
+        <div className="mb-3">
+          <Label>Transport error</Label>
+          <pre className="bg-danger/10 border border-danger/30 text-danger rounded p-3 font-mono text-[11px] whitespace-pre-wrap break-words">
+            {attempt.error}
+          </pre>
+        </div>
+      )}
+      {hasHeaders && (
+        <div className="mb-3">
+          <Label>Headers</Label>
+          <KVList map={attempt.headers} />
+        </div>
+      )}
+      {(hasBody || (!attempt.error && !hasHeaders)) && (
+        <div>
+          <Label>
+            Body
+            {attempt.body_truncated && (
+              <span className="ml-2 text-warn text-[10px] uppercase tracking-wider">
+                truncated
+              </span>
+            )}
+          </Label>
+          <BodyView raw={attempt.body} kind="response" />
+        </div>
+      )}
     </Panel>
   );
 }

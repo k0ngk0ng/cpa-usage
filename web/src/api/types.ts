@@ -207,6 +207,7 @@ export interface APIResponseAttempt {
   index: number;
   timestamp?: string;
   status?: number;
+  error?: string;
   headers: Record<string, string>;
   body: string;
   body_truncated: boolean;
