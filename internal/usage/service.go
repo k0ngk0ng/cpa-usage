@@ -149,6 +149,7 @@ func (s *Service) Events(ctx context.Context, f Filter, p Page) (*storage.UsageE
 		ev.APIGroupDisplay = pickDisplay(apiNames, ev.APIGroupKey)
 		ev.SourceDisplay = pickDisplay(sourceNames, ev.Source)
 		ev.APIGroupKey = redact.APIAlias(ev.APIGroupKey)
+		ev.Source = redact.DisplayName(ev.Source)
 	}
 	return page, nil
 }
@@ -167,6 +168,7 @@ func (s *Service) Credentials(ctx context.Context, f Filter) ([]storage.UsageCre
 	_, sourceNames := s.lookupCaches(ctx)
 	for i := range rows {
 		rows[i].SourceDisplay = pickDisplay(sourceNames, rows[i].Source)
+		rows[i].Source = redact.DisplayName(rows[i].Source)
 	}
 	return rows, nil
 }

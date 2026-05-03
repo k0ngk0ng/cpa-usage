@@ -10,6 +10,7 @@ import (
 
 	"github.com/k0ngk0ng/cpa-usage/internal/cpa"
 	"github.com/k0ngk0ng/cpa-usage/internal/drain"
+	"github.com/k0ngk0ng/cpa-usage/internal/redact"
 	"github.com/k0ngk0ng/cpa-usage/internal/storage"
 )
 
@@ -28,6 +29,9 @@ func authFilesHandler(deps MetaDeps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		for i := range out {
+			out[i].Source = redact.DisplayName(out[i].Source)
+		}
 		c.JSON(http.StatusOK, gin.H{"items": out})
 	}
 }
@@ -38,6 +42,15 @@ func providerMetadataHandler(deps MetaDeps) gin.HandlerFunc {
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
+		}
+		for i := range out {
+			// LookupKey carries a raw api_key when MatchKind=="api_key"; replace
+			// with a stable alias so the UI keeps a unique rowKey without leaking
+			// the secret. Prefix entries are non-sensitive and left intact.
+			if out[i].MatchKind == "api_key" {
+				out[i].LookupKey = redact.APIAlias(out[i].LookupKey)
+			}
+			out[i].ProviderKey = redact.DisplayName(out[i].ProviderKey)
 		}
 		c.JSON(http.StatusOK, gin.H{"items": out})
 	}
