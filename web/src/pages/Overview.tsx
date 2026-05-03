@@ -66,7 +66,15 @@ export default function Overview() {
           hint={summary && summary.total > 0 ? pct(summary.failed, summary.total) : "—"}
           tone={summary && summary.failed > 0 ? "danger" : "default"}
         />
-        <MetricCard label="Input" value={formatTokens(summary?.input_tokens)} />
+        <MetricCard
+          label="Input Total"
+          value={formatTokens((summary?.input_tokens ?? 0) + (summary?.cached_tokens ?? 0))}
+          hint={
+            summary
+              ? `${formatTokens(summary.input_tokens)} new · ${formatTokens(summary.cached_tokens)} cache hit`
+              : "—"
+          }
+        />
         <MetricCard label="Output" value={formatTokens(summary?.output_tokens)} />
         <MetricCard
           label="Cost"

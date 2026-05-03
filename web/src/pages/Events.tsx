@@ -110,8 +110,14 @@ export default function EventsPage() {
     },
     { header: "Latency", align: "right", cellClassName: "whitespace-nowrap", cell: (r) => formatLatency(r.latency_ms) },
     { header: "Input", align: "right", cellClassName: "whitespace-nowrap", cell: (r) => formatNumber(r.input_tokens) },
+    { header: "Cache Hit", align: "right", cellClassName: "whitespace-nowrap", cell: (r) => formatNumber(r.cached_tokens) },
+    {
+      header: "Input Total",
+      align: "right",
+      cellClassName: "whitespace-nowrap font-medium",
+      cell: (r) => formatNumber(r.input_tokens + r.cached_tokens),
+    },
     { header: "Output", align: "right", cellClassName: "whitespace-nowrap", cell: (r) => formatNumber(r.output_tokens) },
-    { header: "Cached", align: "right", cellClassName: "whitespace-nowrap", cell: (r) => formatNumber(r.cached_tokens) },
     { header: "Cost", align: "right", cellClassName: "whitespace-nowrap", cell: (r) => formatCost(r.cost) },
   ];
 
