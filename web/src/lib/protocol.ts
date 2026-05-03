@@ -62,6 +62,11 @@ function messageToTurn(raw: unknown): Turn {
   let text = "";
   const attachments: string[] = [];
 
+  const append = (chunk: string) => {
+    if (!chunk) return;
+    text += (text ? "\n\n" : "") + chunk;
+  };
+
   if (typeof content === "string") {
     text = content;
   } else if (Array.isArray(content)) {
@@ -71,21 +76,31 @@ function messageToTurn(raw: unknown): Turn {
       const type = String(p.type || "");
       if (type === "text" || type === "input_text" || type === "output_text") {
         const t = String(p.text ?? "");
-        if (t) text += (text ? "\n\n" : "") + t;
+        if (t) append(t);
       } else if (type === "thinking" || type === "reasoning") {
         const t = String(p.thinking ?? p.text ?? "");
         if (t) {
           const quoted = t.split("\n").map((l) => "> " + l).join("\n");
-          text += (text ? "\n\n" : "") + "_thinking_\n" + quoted;
+          append("_thinking_\n" + quoted);
         }
       } else if (type === "tool_use") {
         const name = String(p.name || "tool");
-        const input = JSON.stringify(p.input ?? {});
-        attachments.push(`tool_use ${name}(${truncate(input, 240)})`);
+        const input = JSON.stringify(p.input ?? {}, null, 2);
+        append(`**[tool_use ${name}]**\n\n\`\`\`json\n${input}\n\`\`\``);
       } else if (type === "tool_result") {
-        const id = p.tool_use_id ? ` id=${p.tool_use_id}` : "";
-        const c = typeof p.content === "string" ? p.content : JSON.stringify(p.content ?? "");
-        attachments.push(`tool_result${id}: ${truncate(c, 240)}`);
+        const id = p.tool_use_id ? ` ${p.tool_use_id}` : "";
+        const c = typeof p.content === "string"
+          ? p.content
+          : Array.isArray(p.content)
+            ? p.content
+                .map((ci) =>
+                  ci && typeof ci === "object" && typeof (ci as { text?: string }).text === "string"
+                    ? (ci as { text: string }).text
+                    : JSON.stringify(ci),
+                )
+                .join("\n")
+            : JSON.stringify(p.content ?? "");
+        append(`**[tool_result${id}]**\n\n\`\`\`\n${c}\n\`\`\``);
       } else if (type === "image" || type === "input_image") {
         attachments.push("image");
       } else if (type) {
@@ -117,9 +132,6 @@ function geminiContentToTurn(raw: unknown): Turn {
   return { role, text, attachments: attachments.length ? attachments : undefined };
 }
 
-function truncate(s: string, max: number): string {
-  return s.length > max ? s.slice(0, max) + "…" : s;
-}
 
 export interface StreamExtraction {
   detected: boolean;
@@ -128,9 +140,26 @@ export interface StreamExtraction {
   errors: string[];
 }
 
+interface AnthropicBlock {
+  index: number;
+  type: string;
+  name?: string;
+  text: string;
+  partialJSON: string;
+}
+
 export function extractResponseStream(text: string): StreamExtraction {
   const out: StreamExtraction = { detected: false, content: "", thinking: "", errors: [] };
   if (!text) return out;
+
+  // Anthropic content blocks are reassembled by index — tool_use blocks
+  // arrive as a stream of input_json_delta.partial_json chunks that have to
+  // be concatenated to recover the actual call arguments. text_delta /
+  // thinking_delta also belong to a block, so we route them through the same
+  // map and render in declaration order.
+  const blocks = new Map<number, AnthropicBlock>();
+  const blockOrder: number[] = [];
+
   // CPA logs the SSE stream as-is plus a leading "Status: 200" / header
   // block. Walk line by line and only act on `data:` rows.
   const lines = text.split(/\r?\n/);
@@ -149,21 +178,32 @@ export function extractResponseStream(text: string): StreamExtraction {
     const o = obj as Record<string, unknown>;
 
     // Anthropic
-    if (o.type === "content_block_delta") {
-      const d = o.delta as Record<string, unknown> | undefined;
-      const dt = d?.type;
-      if (dt === "text_delta" && typeof d?.text === "string") out.content += d.text;
-      else if (dt === "thinking_delta" && typeof d?.thinking === "string") out.thinking += d.thinking;
-    }
     if (o.type === "content_block_start") {
-      const block = o.content_block as Record<string, unknown> | undefined;
-      if (block?.type === "tool_use") {
-        const name = String(block.name || "tool");
-        out.content += (out.content ? "\n\n" : "") + `**[tool_use ${name}]**\n`;
-      }
+      const block = (o.content_block as Record<string, unknown>) || {};
+      const idx = typeof o.index === "number" ? (o.index as number) : blockOrder.length;
+      if (!blocks.has(idx)) blockOrder.push(idx);
+      blocks.set(idx, {
+        index: idx,
+        type: String(block.type || "text"),
+        name: typeof block.name === "string" ? block.name : undefined,
+        text: "",
+        partialJSON: "",
+      });
     }
-    if (o.type === "message_delta") {
-      // stop_reason etc. — ignored
+    if (o.type === "content_block_delta") {
+      const idx = typeof o.index === "number" ? (o.index as number) : -1;
+      const b = blocks.get(idx);
+      const d = (o.delta as Record<string, unknown>) || {};
+      const dt = d.type;
+      if (dt === "text_delta" && typeof d.text === "string") {
+        if (b) b.text += d.text;
+        else out.content += d.text;
+      } else if (dt === "thinking_delta" && typeof d.thinking === "string") {
+        if (b) b.text += d.thinking;
+        else out.thinking += d.thinking;
+      } else if (dt === "input_json_delta" && typeof d.partial_json === "string") {
+        if (b) b.partialJSON += d.partial_json;
+      }
     }
     if (o.type === "error") {
       const err = o.error as Record<string, unknown> | undefined;
@@ -211,7 +251,38 @@ export function extractResponseStream(text: string): StreamExtraction {
       }
     }
   }
+
+  // Flush Anthropic blocks in the order they were declared so tool_use calls
+  // appear inline alongside the assistant's prose.
+  for (const idx of blockOrder) {
+    const b = blocks.get(idx);
+    if (!b) continue;
+    if (b.type === "text") {
+      out.content += b.text;
+    } else if (b.type === "thinking") {
+      out.thinking += b.text;
+    } else if (b.type === "tool_use") {
+      const json = formatPartialJSON(b.partialJSON);
+      const name = b.name || "tool";
+      const sep = out.content ? "\n\n" : "";
+      out.content += `${sep}**[tool_use ${name}]**\n\n\`\`\`json\n${json}\n\`\`\``;
+    }
+  }
+
   return out;
+}
+
+// formatPartialJSON tries to pretty-print the accumulated input_json_delta.
+// The stream may have been truncated mid-token, so on parse failure we fall
+// back to the raw concatenation.
+function formatPartialJSON(raw: string): string {
+  const t = raw.trim();
+  if (!t) return "{}";
+  try {
+    return JSON.stringify(JSON.parse(t), null, 2);
+  } catch {
+    return raw;
+  }
 }
 
 // extractResponseJSON handles non-streaming JSON responses (e.g. the upstream
@@ -228,7 +299,7 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
   const o = obj as Record<string, unknown>;
   const out: StreamExtraction = { detected: false, content: "", thinking: "", errors: [] };
 
-  // Anthropic non-streaming: { content: [{type:'text', text:'...'}, {type:'thinking', thinking:'...'}] }
+  // Anthropic non-streaming: { content: [{type:'text', text:'...'}, {type:'thinking', thinking:'...'}, {type:'tool_use', name, input}] }
   if (Array.isArray(o.content)) {
     for (const part of o.content) {
       if (!part || typeof part !== "object") continue;
@@ -236,9 +307,14 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
       if (p.type === "text" && typeof p.text === "string") {
         out.content += p.text;
         out.detected = true;
-      }
-      if (p.type === "thinking" && typeof p.thinking === "string") {
+      } else if (p.type === "thinking" && typeof p.thinking === "string") {
         out.thinking += p.thinking;
+        out.detected = true;
+      } else if (p.type === "tool_use") {
+        const name = String(p.name || "tool");
+        const input = JSON.stringify(p.input ?? {}, null, 2);
+        const sep = out.content ? "\n\n" : "";
+        out.content += `${sep}**[tool_use ${name}]**\n\n\`\`\`json\n${input}\n\`\`\``;
         out.detected = true;
       }
     }
