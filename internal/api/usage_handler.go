@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -114,9 +115,9 @@ func usageCredentialsHandler(deps UsageDeps) gin.HandlerFunc {
 }
 
 // usageEventLogHandler reads the CPA per-request log file matching
-// :request_id and returns the user-facing portions only (REQUEST INFO,
-// HEADERS, REQUEST BODY, final RESPONSE — no upstream API REQUEST/RESPONSE
-// rounds).
+// :request_id and returns structured sections (REQUEST INFO, HEADERS,
+// REQUEST BODY, each API RESPONSE attempt with its status, and the final
+// RESPONSE returned to the caller).
 func usageEventLogHandler(deps UsageDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.LogReader == nil || deps.LogReader.Dir == "" {
@@ -139,5 +140,30 @@ func usageEventLogHandler(deps UsageDeps) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"found": true, "entry": entry})
+	}
+}
+
+// usageEventLogRawHandler streams the raw CPA log file (unredacted by us; CPA
+// itself already shortens credential-bearing headers) so users can download
+// and inspect the original. Served as text/plain with a download disposition.
+func usageEventLogRawHandler(deps UsageDeps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.LogReader == nil || deps.LogReader.Dir == "" {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "CPA_LOG_DIR is not configured"})
+			return
+		}
+		requestID := c.Param("request_id")
+		path, err := deps.LogReader.FindLog(requestID)
+		if err != nil {
+			if errors.Is(err, cpa.ErrLogNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"found": false})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.Header("Content-Type", "text/plain; charset=utf-8")
+		c.Header("Content-Disposition", `attachment; filename="`+filepath.Base(path)+`"`)
+		c.File(path)
 	}
 }

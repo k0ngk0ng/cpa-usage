@@ -75,3 +75,47 @@ func TestFindLogInvalidRequestID(t *testing.T) {
 		t.Errorf("expected error for empty request id")
 	}
 }
+
+// TestLogReaderMultipleAPIResponses verifies that retried upstream attempts
+// (multiple `=== API RESPONSE N ===` blocks) are parsed into APIResponses
+// with their per-attempt status code, so the UI can distinguish a 429-then-
+// 200 retry chain from a single 200.
+func TestLogReaderMultipleAPIResponses(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home dir: %v", err)
+	}
+	sampleDir := filepath.Join(home, "Downloads", "logs")
+	if _, err := os.Stat(sampleDir); err != nil {
+		t.Skipf("sample dir not present: %v", err)
+	}
+	r := &LogReader{Dir: sampleDir}
+	path, err := r.FindLog("f27a848a")
+	if err != nil {
+		t.Skipf("sample log f27a848a not available: %v", err)
+	}
+	entry, err := r.Read(path)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(entry.APIResponses) < 2 {
+		t.Fatalf("expected at least 2 APIResponses, got %d", len(entry.APIResponses))
+	}
+	if entry.APIResponses[0].Index != 1 || entry.APIResponses[0].Status != 429 {
+		t.Errorf("APIResponses[0] = %+v, want Index=1 Status=429", entry.APIResponses[0])
+	}
+	if entry.APIResponses[1].Index != 2 || entry.APIResponses[1].Status != 200 {
+		t.Errorf("APIResponses[1] = %+v, want Index=2 Status=200", entry.APIResponses[1])
+	}
+	if entry.APIResponses[0].Body == "" {
+		t.Errorf("APIResponses[0].Body empty")
+	}
+	// Header redaction should still apply.
+	for _, r := range entry.APIResponses {
+		for k, v := range r.Headers {
+			if strings.EqualFold(k, "set-cookie") && v != "" && !strings.Contains(v, "…") && !strings.Contains(v, "***") {
+				t.Errorf("Set-Cookie not redacted in API RESPONSE %d: %q", r.Index, v)
+			}
+		}
+	}
+}

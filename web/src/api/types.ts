@@ -203,12 +203,22 @@ export interface VersionInfo {
   cpa: BuildStamp;
 }
 
+export interface APIResponseAttempt {
+  index: number;
+  timestamp?: string;
+  status?: number;
+  headers: Record<string, string>;
+  body: string;
+  body_truncated: boolean;
+}
+
 export interface EventLogEntry {
   file: string;
   info: Record<string, string>;
   headers: Record<string, string>;
   request_body: string;
   request_body_truncated: boolean;
+  api_responses: APIResponseAttempt[];
   response_body: string;
   response_body_truncated: boolean;
 }

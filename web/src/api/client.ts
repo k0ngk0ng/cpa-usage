@@ -141,6 +141,9 @@ export const api = {
       throw e;
     }
   },
+  eventLogRawURL(requestId: string): string {
+    return apiBase() + "/usage/events/" + encodeURIComponent(requestId) + "/log/raw";
+  },
   async credentials(filter: Filter): Promise<{ items: UsageCredentialStat[] }> {
     return request<{ items: UsageCredentialStat[] }>(
       "/usage/credentials" + buildQuery(filter),

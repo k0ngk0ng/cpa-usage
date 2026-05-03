@@ -9,19 +9,33 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
 // LogReader locates and parses CPA per-request log files written under
-// <CPA_LOG_DIR>/<sanitized-path>-<timestamp>-<request_id>.log. It deliberately
-// surfaces only the user-facing portions of each file (REQUEST INFO, HEADERS,
-// REQUEST BODY, final RESPONSE) — the upstream "API REQUEST/RESPONSE N"
-// sections are skipped because they're duplicates of the user request after
-// rewrites.
+// <CPA_LOG_DIR>/<sanitized-path>-<timestamp>-<request_id>.log. It surfaces
+// the user-facing sections (REQUEST INFO, HEADERS, REQUEST BODY, final
+// RESPONSE) plus each upstream "API RESPONSE N" attempt so retried requests
+// can be inspected per attempt. "API REQUEST N" sections are skipped — they
+// duplicate the user request after rewrites.
 type LogReader struct {
 	Dir            string
 	MaxBodyBytes   int64
 	MaxHeaderBytes int64
+}
+
+// APIResponse captures one upstream attempt's response (status + headers +
+// body). Multiple entries appear when CPA retried the upstream call; the
+// final RESPONSE section (the bytes returned to the caller) is reported
+// separately on LogEntry.
+type APIResponse struct {
+	Index         int               `json:"index"`
+	Timestamp     string            `json:"timestamp,omitempty"`
+	Status        int               `json:"status,omitempty"`
+	Headers       map[string]string `json:"headers"`
+	Body          string            `json:"body"`
+	BodyTruncated bool              `json:"body_truncated"`
 }
 
 // LogEntry is the structured view we hand to the API layer.
@@ -31,6 +45,7 @@ type LogEntry struct {
 	Headers           map[string]string `json:"headers"`
 	RequestBody       string            `json:"request_body"`
 	RequestTruncated  bool              `json:"request_body_truncated"`
+	APIResponses      []APIResponse     `json:"api_responses"`
 	ResponseBody      string            `json:"response_body"`
 	ResponseTruncated bool              `json:"response_body_truncated"`
 }
@@ -108,31 +123,54 @@ func (r *LogReader) Read(path string) (*LogEntry, error) {
 	}
 
 	// Section state. We stream the file, recognizing `=== NAME ===` markers
-	// and routing subsequent lines to the right collector. Upstream sections
-	// (`API REQUEST` / `API RESPONSE`) are routed to /dev/null.
+	// and routing subsequent lines to the right collector. `API REQUEST N`
+	// sections are skipped (they duplicate the user request after rewrites);
+	// `API RESPONSE N` sections are parsed into entry.APIResponses so the UI
+	// can show each upstream attempt and its status code.
 	const (
-		sectionNone     = ""
-		sectionInfo     = "REQUEST INFO"
-		sectionHeaders  = "HEADERS"
-		sectionRequest  = "REQUEST BODY"
-		sectionResponse = "RESPONSE"
-		sectionSkip     = "SKIP"
+		sectionNone        = ""
+		sectionInfo        = "REQUEST INFO"
+		sectionHeaders     = "HEADERS"
+		sectionRequest     = "REQUEST BODY"
+		sectionResponse    = "RESPONSE"
+		sectionAPIResponse = "API RESPONSE"
+		sectionSkip        = "SKIP"
 	)
 	section := sectionNone
 
-	var (
-		reqBuf      strings.Builder
-		respBuf     strings.Builder
-		reqTrunc    bool
-		respTrunc   bool
-		headerBytes int64
+	const (
+		respSubInfo    = "info"
+		respSubHeaders = "headers"
+		respSubBody    = "body"
 	)
+	respSub := respSubInfo
+
+	var (
+		reqBuf       strings.Builder
+		respBuf      strings.Builder
+		reqTrunc     bool
+		respTrunc    bool
+		headerBytes  int64
+		currentResp  *APIResponse
+		currentBody  strings.Builder
+	)
+
+	commitCurrentResp := func() {
+		if currentResp == nil {
+			return
+		}
+		currentResp.Body = strings.TrimRight(currentBody.String(), "\n")
+		entry.APIResponses = append(entry.APIResponses, *currentResp)
+		currentResp = nil
+		currentBody.Reset()
+	}
 
 	for {
 		line, err := br.ReadString('\n')
 		if line != "" {
 			trimmed := strings.TrimRight(line, "\r\n")
 			if marker, ok := parseSectionMarker(trimmed); ok {
+				commitCurrentResp()
 				switch {
 				case marker == sectionInfo:
 					section = sectionInfo
@@ -142,7 +180,14 @@ func (r *LogReader) Read(path string) (*LogEntry, error) {
 					section = sectionRequest
 				case marker == sectionResponse:
 					section = sectionResponse
-				case strings.HasPrefix(marker, "API REQUEST") || strings.HasPrefix(marker, "API RESPONSE"):
+				case strings.HasPrefix(marker, "API RESPONSE"):
+					section = sectionAPIResponse
+					respSub = respSubInfo
+					currentResp = &APIResponse{
+						Index:   parseTrailingInt(marker, "API RESPONSE"),
+						Headers: map[string]string{},
+					}
+				case strings.HasPrefix(marker, "API REQUEST"):
 					section = sectionSkip
 				default:
 					section = sectionSkip
@@ -183,6 +228,44 @@ func (r *LogReader) Read(path string) (*LogEntry, error) {
 							respBuf.WriteString(line)
 						}
 					}
+				case sectionAPIResponse:
+					if currentResp == nil {
+						break
+					}
+					switch trimmed {
+					case "Headers:":
+						respSub = respSubHeaders
+					case "Body:":
+						respSub = respSubBody
+					default:
+						switch respSub {
+						case respSubInfo:
+							if k, v, ok := splitKV(trimmed); ok {
+								switch k {
+								case "Status":
+									currentResp.Status, _ = strconv.Atoi(strings.TrimSpace(v))
+								case "Timestamp":
+									currentResp.Timestamp = v
+								}
+							}
+						case respSubHeaders:
+							if k, v, ok := splitKV(trimmed); ok {
+								currentResp.Headers[k] = redactHeader(k, v)
+							}
+						case respSubBody:
+							if !currentResp.BodyTruncated {
+								remaining := maxBody - int64(currentBody.Len())
+								if remaining <= 0 {
+									currentResp.BodyTruncated = true
+								} else if int64(len(line)) > remaining {
+									currentBody.WriteString(line[:remaining])
+									currentResp.BodyTruncated = true
+								} else {
+									currentBody.WriteString(line)
+								}
+							}
+						}
+					}
 				}
 			}
 		}
@@ -193,6 +276,7 @@ func (r *LogReader) Read(path string) (*LogEntry, error) {
 			return nil, err
 		}
 	}
+	commitCurrentResp()
 
 	entry.RequestBody = strings.TrimRight(reqBuf.String(), "\n")
 	entry.RequestTruncated = reqTrunc
@@ -212,6 +296,21 @@ func parseSectionMarker(line string) (string, bool) {
 		return "", false
 	}
 	return inner, true
+}
+
+// parseTrailingInt extracts the trailing integer from a marker like
+// "API RESPONSE 2" given the prefix "API RESPONSE". Returns 0 when no integer
+// is present.
+func parseTrailingInt(marker, prefix string) int {
+	rest := strings.TrimSpace(strings.TrimPrefix(marker, prefix))
+	if rest == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(rest)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 // splitKV pulls a "Key: value" pair out of a header/info line. Returns
