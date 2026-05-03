@@ -67,7 +67,7 @@ export default function Overview() {
           tone={summary && summary.failed > 0 ? "danger" : "default"}
         />
         <MetricCard
-          label="Input Total"
+          label="Input"
           value={formatTokens((summary?.input_tokens ?? 0) + (summary?.cached_tokens ?? 0))}
           hint={
             summary
