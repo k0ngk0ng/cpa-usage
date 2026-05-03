@@ -153,7 +153,7 @@ func (s *Service) collectProviderMetadata(ctx context.Context) ([]storage.Provid
 				add(storage.ProviderMetadata{
 					LookupKey:    apiKey,
 					ProviderType: pf.kind,
-					DisplayName:  firstNonEmpty(display, apiKey),
+					DisplayName:  display,
 					ProviderKey:  apiKey,
 					MatchKind:    "api_key",
 				})
@@ -162,7 +162,7 @@ func (s *Service) collectProviderMetadata(ctx context.Context) ([]storage.Provid
 				add(storage.ProviderMetadata{
 					LookupKey:    prefix,
 					ProviderType: pf.kind,
-					DisplayName:  firstNonEmpty(name, prefix),
+					DisplayName:  name,
 					ProviderKey:  apiKey,
 					MatchKind:    "prefix",
 				})
@@ -189,7 +189,7 @@ func (s *Service) collectProviderMetadata(ctx context.Context) ([]storage.Provid
 				add(storage.ProviderMetadata{
 					LookupKey:    apiKey,
 					ProviderType: "openai-compatibility",
-					DisplayName:  firstNonEmpty(display, apiKey),
+					DisplayName:  display,
 					ProviderKey:  apiKey,
 					MatchKind:    "api_key",
 				})
