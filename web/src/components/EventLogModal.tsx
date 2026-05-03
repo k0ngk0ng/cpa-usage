@@ -1,8 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { api, HttpError } from "../api/client";
 import type { APIResponseAttempt, EventLogEntry, UsageEventRecord } from "../api/types";
 import { formatTimestamp } from "../lib/utils";
+import {
+  extractRequestTurns,
+  extractResponseJSON,
+  extractResponseStream,
+  streamToMarkdown,
+  turnsToMarkdown,
+} from "../lib/protocol";
 
 interface Props {
   event: UsageEventRecord;
@@ -199,7 +208,7 @@ function buildTabs(entry: EventLogEntry | null): Tab[] {
       : undefined,
     render: () => (
       <Panel>
-        <CodeBlock text={entry.request_body} />
+        <BodyView raw={entry.request_body} kind="request" />
       </Panel>
     ),
   });
@@ -223,7 +232,7 @@ function buildTabs(entry: EventLogEntry | null): Tab[] {
       : undefined,
     render: () => (
       <Panel>
-        <CodeBlock text={entry.response_body} />
+        <BodyView raw={entry.response_body} kind="response" />
       </Panel>
     ),
   });
@@ -256,7 +265,7 @@ function APIResponseTab({ attempt }: { attempt: APIResponseAttempt }) {
             </span>
           )}
         </Label>
-        <CodeBlock text={attempt.body} />
+        <BodyView raw={attempt.body} kind="response" />
       </div>
     </Panel>
   );
@@ -304,6 +313,101 @@ function CodeBlock({ text }: { text: string }) {
     <pre className="bg-panel border border-border rounded p-3 font-mono text-[11px] whitespace-pre-wrap break-words">
       {pretty || <span className="text-muted">—</span>}
     </pre>
+  );
+}
+
+// BodyView toggles between a markdown projection of the protocol envelope and
+// the raw bytes. For requests we extract conversation turns; for responses we
+// concatenate SSE text deltas, falling back to JSON shape extraction for
+// non-streaming bodies (e.g. 4xx errors).
+function BodyView({ raw, kind }: { raw: string; kind: "request" | "response" }) {
+  const projection = useMemo(() => {
+    if (kind === "request") {
+      const turns = extractRequestTurns(raw);
+      return turns ? { md: turnsToMarkdown(turns), label: `${turns.length} turn${turns.length > 1 ? "s" : ""}` } : null;
+    }
+    const stream = extractResponseStream(raw);
+    if (stream.detected) {
+      return { md: streamToMarkdown(stream), label: "stream" };
+    }
+    const json = extractResponseJSON(raw);
+    if (json) return { md: streamToMarkdown(json), label: "json" };
+    return null;
+  }, [raw, kind]);
+
+  const [mode, setMode] = useState<"pretty" | "raw">(projection ? "pretty" : "raw");
+
+  // Keep mode coherent if the underlying raw text changes (e.g. switching
+  // tabs renders a different body and the projection result flips).
+  useEffect(() => {
+    if (!projection && mode === "pretty") setMode("raw");
+  }, [projection, mode]);
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-1">
+        <ToggleButton
+          active={mode === "pretty"}
+          disabled={!projection}
+          onClick={() => setMode("pretty")}
+          title={projection ? `Rendered (${projection.label})` : "No structured content detected"}
+        >
+          Markdown
+        </ToggleButton>
+        <ToggleButton active={mode === "raw"} onClick={() => setMode("raw")}>
+          Raw
+        </ToggleButton>
+        {!projection && (
+          <span className="text-[10px] text-muted ml-2">
+            No structured content detected — showing raw bytes.
+          </span>
+        )}
+      </div>
+      {mode === "pretty" && projection ? (
+        <MarkdownView markdown={projection.md} />
+      ) : (
+        <CodeBlock text={raw} />
+      )}
+    </div>
+  );
+}
+
+function ToggleButton({
+  active,
+  disabled,
+  onClick,
+  title,
+  children,
+}: {
+  active: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={clsx(
+        "text-[11px] px-2 py-0.5 rounded border",
+        active
+          ? "border-border bg-panel text-ink"
+          : "border-transparent text-muted hover:text-ink",
+        disabled && "opacity-40 cursor-not-allowed",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function MarkdownView({ markdown }: { markdown: string }) {
+  return (
+    <div className="bg-panel border border-border rounded p-3 prose-md">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
+    </div>
   );
 }
 
