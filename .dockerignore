@@ -1,0 +1,33 @@
+# Build artifacts and dependency caches we never want in the build context.
+.git
+.gitignore
+.github
+.idea
+.vscode
+
+# Local build outputs
+/cpa-usage
+/server
+/dist
+
+# SPA — Dockerfile builds this fresh inside the web-builder stage.
+web/node_modules
+web/dist
+
+# Ephemeral state.
+*.db
+*.db-shm
+*.db-wal
+.env
+*.log
+logs/
+
+# Local Docker artifacts.
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Misc
+*.md
+!README.md
+LICENSE
