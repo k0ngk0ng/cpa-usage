@@ -12,6 +12,7 @@ const NAV = [
   { to: "/events", label: "Events" },
   { to: "/credentials", label: "Credentials" },
   { to: "/pricing", label: "Pricing" },
+  { to: "/aliases", label: "Aliases" },
   { to: "/auth-files", label: "Auth Files" },
   { to: "/import", label: "Migration" },
 ];

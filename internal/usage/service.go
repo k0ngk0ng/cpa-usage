@@ -198,6 +198,14 @@ func (s *Service) Analysis(ctx context.Context, f Filter) (*storage.UsageAnalysi
 
 // lookupCaches returns the api_group_key→display and source→display maps.
 // Errors are silently swallowed (display falls back to the masked redact form).
+//
+// apiNames is built from two sources, in priority order:
+//  1. api_key aliases (operator-curated friendly labels)
+//  2. provider_metadata DisplayName entries (auto-discovered)
+//
+// The alias pass runs second so it overwrites any provider_metadata entry
+// whose lookup_key happens to collide with a raw api_key — operator intent
+// always wins.
 func (s *Service) lookupCaches(ctx context.Context) (apiNames, sourceNames map[string]string) {
 	apiNames = make(map[string]string)
 	sourceNames = make(map[string]string)
@@ -224,6 +232,14 @@ func (s *Service) lookupCaches(ctx context.Context) (apiNames, sourceNames map[s
 				continue
 			}
 			apiNames[m.LookupKey] = m.DisplayName
+		}
+	}
+	if aliases, err := s.store.ListAPIKeyAliases(ctx); err == nil {
+		for _, a := range aliases {
+			if a.APIKey == "" || a.Alias == "" {
+				continue
+			}
+			apiNames[a.APIKey] = a.Alias
 		}
 	}
 	return apiNames, sourceNames

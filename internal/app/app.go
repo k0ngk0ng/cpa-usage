@@ -107,6 +107,7 @@ func New(cfg *config.Config, build BuildInfo) (*App, error) {
 		},
 		Usage:   api.UsageDeps{Service: usageSvc, Store: store, LogReader: &cpa.LogReader{Dir: cfg.CPALogDir}},
 		Pricing: api.PricingDeps{Service: priceSvc},
+		Aliases: api.AliasDeps{Store: store},
 		Meta: api.MetaDeps{
 			Store:   store,
 			Drain:   drainSvc,

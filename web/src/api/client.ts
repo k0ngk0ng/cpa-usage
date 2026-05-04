@@ -1,4 +1,8 @@
 import type {
+  AliasesExport,
+  AliasesImportResult,
+  APIKeyAlias,
+  APIKeyOverview,
   AuthFile,
   BackfillResult,
   DrainStatus,
@@ -190,5 +194,33 @@ export const api = {
       "/pricing?" + new URLSearchParams({ model }).toString(),
       { method: "DELETE" },
     );
+  },
+
+  async aliases(): Promise<{ items: APIKeyOverview[] }> {
+    return request<{ items: APIKeyOverview[] }>("/aliases");
+  },
+  async upsertAlias(api_key: string, alias: string): Promise<{ ok: boolean }> {
+    return request("/aliases", {
+      method: "PUT",
+      body: JSON.stringify({ api_key, alias }),
+    });
+  },
+  async deleteAlias(api_key: string): Promise<{ ok: boolean }> {
+    return request(
+      "/aliases?" + new URLSearchParams({ api_key }).toString(),
+      { method: "DELETE" },
+    );
+  },
+  async exportAliases(): Promise<AliasesExport> {
+    return request<AliasesExport>("/aliases/export");
+  },
+  async importAliases(
+    items: APIKeyAlias[],
+    mode: "merge" | "replace",
+  ): Promise<AliasesImportResult> {
+    return request<AliasesImportResult>("/aliases/import", {
+      method: "POST",
+      body: JSON.stringify({ mode, items }),
+    });
   },
 };

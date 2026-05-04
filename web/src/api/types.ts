@@ -244,3 +244,28 @@ export interface BackfillResult {
   logs_indexed: number;
   log_dir: string;
 }
+
+export interface APIKeyOverview {
+  api_key: string;
+  alias: string;
+  event_count: number;
+  alias_updated_at?: string;
+}
+
+export interface APIKeyAlias {
+  api_key: string;
+  alias: string;
+  updated_at?: string;
+}
+
+export interface AliasesExport {
+  version: number;
+  exported_at: string;
+  items: APIKeyAlias[];
+}
+
+export interface AliasesImportResult {
+  mode: "merge" | "replace";
+  applied: number;
+  received: number;
+}

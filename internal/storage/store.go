@@ -37,6 +37,16 @@ type Store interface {
 	UpsertPricing(ctx context.Context, p ModelPriceSetting) error
 	DeletePricing(ctx context.Context, model string) error
 
+	// API key aliases — operator-friendly labels for raw api_key values.
+	// ListAPIKeyOverview joins distinct api_key values from usage_events with
+	// their alias (left join) so the management UI can surface keys that have
+	// no alias yet. ReplaceAPIKeyAliases is for the import "replace" mode.
+	ListAPIKeyAliases(ctx context.Context) ([]APIKeyAlias, error)
+	ListAPIKeyOverview(ctx context.Context) ([]APIKeyOverview, error)
+	UpsertAPIKeyAlias(ctx context.Context, alias APIKeyAlias) error
+	DeleteAPIKeyAlias(ctx context.Context, apiKey string) error
+	ReplaceAPIKeyAliases(ctx context.Context, items []APIKeyAlias) error
+
 	// Metadata caches
 	ReplaceAuthFiles(ctx context.Context, files []AuthFile) error
 	ListAuthFiles(ctx context.Context) ([]AuthFile, error)

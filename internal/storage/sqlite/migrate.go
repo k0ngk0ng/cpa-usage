@@ -69,11 +69,21 @@ type modelPriceSettingModel struct {
 
 func (modelPriceSettingModel) TableName() string { return "model_price_settings" }
 
+type apiKeyAliasModel struct {
+	ID        uint   `gorm:"primaryKey"`
+	APIKey    string `gorm:"uniqueIndex;size:256;column:api_key"`
+	Alias     string `gorm:"size:128"`
+	UpdatedAt time.Time
+}
+
+func (apiKeyAliasModel) TableName() string { return "api_key_aliases" }
+
 func allModels() []any {
 	return []any{
 		&usageEventModel{},
 		&authFileModel{},
 		&providerMetadataModel{},
 		&modelPriceSettingModel{},
+		&apiKeyAliasModel{},
 	}
 }

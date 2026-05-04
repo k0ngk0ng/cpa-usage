@@ -103,6 +103,11 @@ All endpoints are mounted under `<APP_BASE_PATH>/api/v1`. Protected endpoints re
 | GET | `/pricing` | list per-model price settings |
 | PUT | `/pricing` or `/pricing/:model` | upsert |
 | DELETE | `/pricing` or `/pricing/:model` | remove |
+| GET | `/aliases` | list api_keys observed in events with their alias |
+| PUT | `/aliases` | upsert `{ "api_key": "...", "alias": "..." }` |
+| DELETE | `/aliases?api_key=...` | clear alias |
+| GET | `/aliases/export` | JSON dump of all aliases |
+| POST | `/aliases/import` | bulk merge / replace |
 
 Common query params: `range=all|today|4h|8h|12h|24h|7d|custom`, `start`, `end`, `model` (repeatable), `source` (repeatable), `auth_index`, `result=success|failed`, `page`, `page_size`.
 

@@ -24,6 +24,7 @@ type RouterConfig struct {
 	Auth    AuthDeps
 	Usage   UsageDeps
 	Pricing PricingDeps
+	Aliases AliasDeps
 	Meta    MetaDeps
 }
 
@@ -77,6 +78,12 @@ func New(cfg RouterConfig) *gin.Engine {
 				protected.PUT("/pricing/:model", upsertPricingHandler(cfg.Pricing))
 				protected.DELETE("/pricing", deletePricingHandler(cfg.Pricing))
 				protected.DELETE("/pricing/:model", deletePricingHandler(cfg.Pricing))
+
+				protected.GET("/aliases", listAliasesHandler(cfg.Aliases))
+				protected.PUT("/aliases", upsertAliasHandler(cfg.Aliases))
+				protected.DELETE("/aliases", deleteAliasHandler(cfg.Aliases))
+				protected.GET("/aliases/export", exportAliasesHandler(cfg.Aliases))
+				protected.POST("/aliases/import", importAliasesHandler(cfg.Aliases))
 			}
 		}
 

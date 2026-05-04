@@ -68,6 +68,27 @@ type ModelPriceSetting struct {
 	UpdatedAt             time.Time
 }
 
+// APIKeyAlias maps a raw upstream api_key (e.g. "sk-abc...") to a
+// human-friendly label that can be edited in the dashboard and rendered in
+// place of the masked key wherever api_group_display is surfaced.
+type APIKeyAlias struct {
+	APIKey    string    `json:"api_key"`
+	Alias     string    `json:"alias"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// APIKeyOverview is the row shape of the Aliases management page: every
+// distinct api_key observed in usage_events, left-joined with its alias.
+// EventCount is included so operators can prioritise the keys that actually
+// see traffic. APIKey is the raw value — the alias-management page is
+// already auth-gated and the operator needs the full key to edit/import.
+type APIKeyOverview struct {
+	APIKey         string    `json:"api_key"`
+	Alias          string    `json:"alias"`
+	EventCount     int64     `json:"event_count"`
+	AliasUpdatedAt time.Time `json:"alias_updated_at,omitempty"`
+}
+
 // UsageFilter parameterizes all aggregation/listing queries.
 type UsageFilter struct {
 	Range     string // all | today | 4h | 8h | 12h | 24h | 7d | custom
