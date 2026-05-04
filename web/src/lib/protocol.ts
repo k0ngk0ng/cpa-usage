@@ -46,7 +46,11 @@ export function extractRequestTurns(rawJson: string): Turn[] | null {
     for (const m of o.messages) turns.push(messageToTurn(m));
   }
   if (Array.isArray(o.input)) {
-    for (const m of o.input) turns.push(messageToTurn(m));
+    // OpenAI Responses input[] is a mixed list: messages, function_call,
+    // function_call_output, reasoning, etc. Top-level non-message items
+    // don't have role/content, so messageToTurn would render them as
+    // "user (empty)". Hand them off to a dedicated converter.
+    for (const m of o.input) turns.push(responsesInputToTurn(m));
   }
   if (Array.isArray(o.contents)) {
     for (const m of o.contents) turns.push(geminiContentToTurn(m));
@@ -112,6 +116,48 @@ function messageToTurn(raw: unknown): Turn {
   return { role, text, attachments: attachments.length ? attachments : undefined };
 }
 
+// responsesInputToTurn handles the OpenAI Responses `input[]` mixed-item
+// shape. Items with type=message fall back to messageToTurn; function_call
+// and function_call_output items are rendered as their own assistant/tool
+// turns so they don't show up as "user (empty)".
+function responsesInputToTurn(raw: unknown): Turn {
+  const m = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const type = String(m.type || "");
+  if (type === "function_call") {
+    const name = String(m.name || "tool");
+    const args = typeof m.arguments === "string" ? m.arguments : JSON.stringify(m.arguments ?? {});
+    const json = formatPartialJSON(args);
+    const callID = m.call_id ? ` ${m.call_id}` : "";
+    return {
+      role: "assistant",
+      text: `**[tool_use ${name}${callID}]**\n\n\`\`\`json\n${json}\n\`\`\``,
+    };
+  }
+  if (type === "function_call_output") {
+    const callID = m.call_id ? ` ${m.call_id}` : "";
+    const out = typeof m.output === "string" ? m.output : JSON.stringify(m.output ?? "", null, 2);
+    return {
+      role: "tool",
+      text: `**[tool_result${callID}]**\n\n\`\`\`\n${out}\n\`\`\``,
+    };
+  }
+  if (type === "reasoning") {
+    const summary = Array.isArray(m.summary)
+      ? m.summary
+          .map((s) => (s && typeof s === "object" ? String((s as { text?: string }).text ?? "") : ""))
+          .filter(Boolean)
+          .join("\n")
+      : "";
+    if (summary) {
+      const quoted = summary.split("\n").map((l) => "> " + l).join("\n");
+      return { role: "assistant", text: "_thinking_\n" + quoted };
+    }
+    return { role: "assistant", text: "", attachments: ["reasoning"] };
+  }
+  // Default: messages, and anything else with a `role`+`content` shape.
+  return messageToTurn(raw);
+}
+
 function geminiContentToTurn(raw: unknown): Turn {
   const m = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const role = String(m.role || "user");
@@ -159,6 +205,20 @@ export function extractResponseStream(text: string): StreamExtraction {
   // map and render in declaration order.
   const blocks = new Map<number, AnthropicBlock>();
   const blockOrder: number[] = [];
+
+  // OpenAI Responses function_call items are streamed as
+  // response.output_item.added (with name/call_id) followed by
+  // response.function_call_arguments.delta chunks. Track them by
+  // output_index and flush at the end so the user sees the actual tool call
+  // even when the response contains no output_text.
+  interface OpenAICall {
+    name: string;
+    callID: string;
+    args: string;
+    order: number;
+  }
+  const openAICalls = new Map<number, OpenAICall>();
+  let openAICallOrder = 0;
 
   // CPA logs the SSE stream as-is plus a leading "Status: 200" / header
   // block. Walk line by line and only act on `data:` rows.
@@ -222,6 +282,41 @@ export function extractResponseStream(text: string): StreamExtraction {
       ) {
         out.thinking += o.delta;
       }
+      if (o.type === "response.function_call_arguments.delta" && typeof o.delta === "string") {
+        const idx = typeof o.output_index === "number" ? (o.output_index as number) : -1;
+        const call = openAICalls.get(idx);
+        if (call) {
+          call.args += o.delta;
+        } else {
+          openAICalls.set(idx, {
+            name: "tool",
+            callID: "",
+            args: o.delta,
+            order: openAICallOrder++,
+          });
+        }
+      }
+    }
+    if (o.type === "response.output_item.added") {
+      const item = (o.item as Record<string, unknown>) || {};
+      if (item.type === "function_call") {
+        const idx = typeof o.output_index === "number" ? (o.output_index as number) : -1;
+        const existing = openAICalls.get(idx);
+        const partial = typeof item.arguments === "string" ? (item.arguments as string) : "";
+        openAICalls.set(idx, {
+          name: typeof item.name === "string" ? (item.name as string) : existing?.name || "tool",
+          callID: typeof item.call_id === "string" ? (item.call_id as string) : existing?.callID || "",
+          args: (existing?.args || "") + partial,
+          order: existing?.order ?? openAICallOrder++,
+        });
+      }
+    }
+    if (o.type === "response.function_call_arguments.done") {
+      const idx = typeof o.output_index === "number" ? (o.output_index as number) : -1;
+      const call = openAICalls.get(idx);
+      if (call && typeof o.arguments === "string" && (o.arguments as string).length > call.args.length) {
+        call.args = o.arguments as string;
+      }
     }
 
     // OpenAI chat completions
@@ -267,6 +362,15 @@ export function extractResponseStream(text: string): StreamExtraction {
       const sep = out.content ? "\n\n" : "";
       out.content += `${sep}**[tool_use ${name}]**\n\n\`\`\`json\n${json}\n\`\`\``;
     }
+  }
+
+  // Flush OpenAI Responses function_call items in arrival order.
+  const calls = Array.from(openAICalls.values()).sort((a, b) => a.order - b.order);
+  for (const c of calls) {
+    const json = formatPartialJSON(c.args);
+    const id = c.callID ? ` ${c.callID}` : "";
+    const sep = out.content ? "\n\n" : "";
+    out.content += `${sep}**[tool_use ${c.name}${id}]**\n\n\`\`\`json\n${json}\n\`\`\``;
   }
 
   return out;
@@ -337,11 +441,21 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
     }
   }
 
-  // OpenAI Responses non-streaming: { output: [ { type:'message', content:[...]} ] }
+  // OpenAI Responses non-streaming: { output: [ { type:'message', content:[...]}, { type:'function_call', name, arguments, call_id } ] }
   if (Array.isArray(o.output)) {
     for (const item of o.output) {
       if (!item || typeof item !== "object") continue;
       const it = item as Record<string, unknown>;
+      if (it.type === "function_call") {
+        const name = String(it.name || "tool");
+        const args = typeof it.arguments === "string" ? (it.arguments as string) : JSON.stringify(it.arguments ?? {});
+        const json = formatPartialJSON(args);
+        const callID = it.call_id ? ` ${it.call_id}` : "";
+        const sep = out.content ? "\n\n" : "";
+        out.content += `${sep}**[tool_use ${name}${callID}]**\n\n\`\`\`json\n${json}\n\`\`\``;
+        out.detected = true;
+        continue;
+      }
       const c = it.content;
       if (Array.isArray(c)) {
         for (const part of c) {
