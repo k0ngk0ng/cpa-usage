@@ -42,20 +42,21 @@ FROM alpine:3.20
 
 RUN apk add --no-cache ca-certificates tzdata wget && \
     addgroup -S app && adduser -S -G app -H -h /var/lib/cpa-usage app && \
-    mkdir -p /var/lib/cpa-usage /var/log/cpa-usage /home/cliproxy/logs && \
-    chown -R app:app /var/lib/cpa-usage /var/log/cpa-usage
+    mkdir -p /var/lib/cpa-usage/data /var/lib/cpa-usage/logs /home/cliproxy/logs && \
+    chown -R app:app /var/lib/cpa-usage
 
 COPY --from=go-builder /out/cpa-usage /usr/local/bin/cpa-usage
 
+# Binary defaults are relative (./data/app.db, ./logs); WORKDIR below anchors
+# them under the data volume. Only override what differs from the binary
+# defaults.
 ENV APP_PORT=8318 \
-    SQLITE_PATH=/var/lib/cpa-usage/app.db \
-    LOG_DIR=/var/log/cpa-usage \
     CPA_LOG_DIR=/home/cliproxy/logs \
     TZ=Asia/Shanghai
 
 EXPOSE 8318
 
-VOLUME ["/var/lib/cpa-usage", "/var/log/cpa-usage"]
+VOLUME ["/var/lib/cpa-usage"]
 
 USER app
 WORKDIR /var/lib/cpa-usage

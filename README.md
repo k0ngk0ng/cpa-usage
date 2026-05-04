@@ -66,7 +66,7 @@ All configuration is via environment variables (also see `.env.example`):
 | `APP_BASE_PATH` | `/usage` | Set to `""` for root mount |
 | `TZ` | `Asia/Shanghai` | Drives "today" boundary + 03:00 cleanup |
 | `STORAGE_DRIVER` | `sqlite` | Only `sqlite` in v1 |
-| `SQLITE_PATH` | `/var/lib/cpa-usage/app.db` | |
+| `SQLITE_PATH` | `./data/app.db` | Resolved against the process working directory |
 | `REDIS_QUEUE_ADDR` | — | Defaults to `<cpa-host>:8317` |
 | `REDIS_QUEUE_BATCH_SIZE` | `1000` | |
 | `REDIS_QUEUE_IDLE_INTERVAL` | `1s` | |
@@ -77,7 +77,7 @@ All configuration is via environment variables (also see `.env.example`):
 | `AUTH_SESSION_TTL` | `168h` | |
 | `LOG_LEVEL` | `info` | |
 | `LOG_FILE_ENABLED` | `true` | |
-| `LOG_DIR` | `/var/lib/cpa-usage/logs` | |
+| `LOG_DIR` | `./logs` | Resolved against the process working directory |
 | `LOG_RETENTION_DAYS` | `7` | Lumberjack max-age + max-backups |
 
 ## API surface

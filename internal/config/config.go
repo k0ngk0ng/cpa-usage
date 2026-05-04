@@ -53,7 +53,7 @@ func Load() (*Config, error) {
 		AppPort:           intOr("APP_PORT", 8318),
 		AppBasePath:       basePathOr(os.Getenv("APP_BASE_PATH"), "/usage"),
 		StorageDriver:     strOr("STORAGE_DRIVER", "sqlite"),
-		SQLitePath:        strOr("SQLITE_PATH", "/var/lib/cpa-usage/app.db"),
+		SQLitePath:        strOr("SQLITE_PATH", "./data/app.db"),
 		RedisQueueAddr:    strings.TrimSpace(os.Getenv("REDIS_QUEUE_ADDR")),
 		RedisQueueBatch:   intOr("REDIS_QUEUE_BATCH_SIZE", 1000),
 		RedisIdleInterval: durationOr("REDIS_QUEUE_IDLE_INTERVAL", time.Second),
