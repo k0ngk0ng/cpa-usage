@@ -36,7 +36,9 @@ type Config struct {
 	LogDir       string
 	LogRetention int
 
-	CPALogDir string
+	CPALogDir         string
+	LogBodyMaxBytes   int64
+	LogHeaderMaxBytes int64
 
 	AuthEnabled    bool
 	LoginPassword  string
@@ -65,6 +67,8 @@ func Load() (*Config, error) {
 		LogDir:            strOr("LOG_DIR", "./logs"),
 		LogRetention:      intOr("LOG_RETENTION_DAYS", 7),
 		CPALogDir:         strOr("CPA_LOG_DIR", "/home/cliproxy/logs"),
+		LogBodyMaxBytes:   int64Or("LOG_BODY_MAX_BYTES", 8*1024*1024),
+		LogHeaderMaxBytes: int64Or("LOG_HEADER_MAX_BYTES", 64*1024),
 		AuthEnabled:       boolOr("AUTH_ENABLED", false),
 		LoginPassword:     os.Getenv("LOGIN_PASSWORD"),
 		SessionTTL:        durationOr("AUTH_SESSION_TTL", 168*time.Hour),
@@ -102,6 +106,18 @@ func strOr(key, def string) string {
 		return def
 	}
 	return v
+}
+
+func int64Or(key string, def int64) int64 {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n <= 0 {
+		return def
+	}
+	return n
 }
 
 func intOr(key string, def int) int {
