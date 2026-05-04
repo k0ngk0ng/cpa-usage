@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"time"
@@ -38,7 +39,7 @@ func (s *Store) ListAPIKeyOverview(ctx context.Context) ([]storage.APIKeyOvervie
 		APIKey         string
 		Alias          string
 		EventCount     int64
-		AliasUpdatedAt time.Time
+		AliasUpdatedAt sql.NullTime
 	}
 	var rows []row
 	// LEFT JOIN preserves observed api_keys without an alias; aliases that
@@ -50,7 +51,7 @@ func (s *Store) ListAPIKeyOverview(ctx context.Context) ([]storage.APIKeyOvervie
 			e.api_key AS api_key,
 			COALESCE(a.alias, '') AS alias,
 			COUNT(*) AS event_count,
-			COALESCE(a.updated_at, '') AS alias_updated_at
+			a.updated_at AS alias_updated_at
 		`).
 		Joins("LEFT JOIN api_key_aliases AS a ON a.api_key = e.api_key").
 		Where("e.api_key <> ''").
@@ -64,11 +65,15 @@ func (s *Store) ListAPIKeyOverview(ctx context.Context) ([]storage.APIKeyOvervie
 	out := make([]storage.APIKeyOverview, 0, len(rows))
 	for _, r := range rows {
 		seen[r.APIKey] = struct{}{}
+		var ts time.Time
+		if r.AliasUpdatedAt.Valid {
+			ts = r.AliasUpdatedAt.Time
+		}
 		out = append(out, storage.APIKeyOverview{
 			APIKey:         r.APIKey,
 			Alias:          r.Alias,
 			EventCount:     r.EventCount,
-			AliasUpdatedAt: r.AliasUpdatedAt,
+			AliasUpdatedAt: ts,
 		})
 	}
 	// Append aliases for keys that have no events yet (manually added via
