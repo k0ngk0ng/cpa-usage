@@ -1,6 +1,6 @@
 import { ChangeEvent, DragEvent, useRef, useState } from "react";
 import { api, HttpError } from "../api/client";
-import type { ImportSnapshotResult } from "../api/types";
+import type { BackfillResult, ImportSnapshotResult } from "../api/types";
 
 export default function ImportPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -10,6 +10,10 @@ export default function ImportPage() {
   const [err, setErr] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileInput = useRef<HTMLInputElement | null>(null);
+
+  const [backfillRunning, setBackfillRunning] = useState(false);
+  const [backfillResult, setBackfillResult] = useState<BackfillResult | null>(null);
+  const [backfillErr, setBackfillErr] = useState<string | null>(null);
 
   const pickFile = (f: File | null) => {
     setFile(f);
@@ -56,6 +60,21 @@ export default function ImportPage() {
       else setErr("Import failed: " + (e as Error).message);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const runBackfill = async () => {
+    setBackfillErr(null);
+    setBackfillResult(null);
+    setBackfillRunning(true);
+    try {
+      const r = await api.backfillRequestIDs();
+      setBackfillResult(r);
+    } catch (e) {
+      if (e instanceof HttpError) setBackfillErr(e.message);
+      else setBackfillErr("Backfill failed: " + (e as Error).message);
+    } finally {
+      setBackfillRunning(false);
     }
   };
 
@@ -164,6 +183,73 @@ export default function ImportPage() {
                 value={new Date(result.exported_at).toLocaleString()}
               />
             )}
+          </div>
+        )}
+      </section>
+
+      <section className="bg-panel border border-border rounded-lg p-4 space-y-4">
+        <div className="space-y-2">
+          <h2 className="text-sm uppercase tracking-wider text-muted">
+            Backfill request IDs from CPA logs
+          </h2>
+          <p className="text-sm text-muted leading-relaxed">
+            Imported events have no{" "}
+            <code className="font-mono text-xs bg-panel2 px-1.5 py-0.5 rounded">
+              request_id
+            </code>{" "}
+            because the legacy export doesn't carry one. This scans{" "}
+            <code className="font-mono text-xs bg-panel2 px-1.5 py-0.5 rounded">
+              CPA_LOG_DIR
+            </code>{" "}
+            for per-request log filenames and links each imported event to
+            its log by matching timestamps within ±2s. When multiple log
+            files fall in the window, the request body's{" "}
+            <code className="font-mono">model</code> field is read to
+            disambiguate; ambiguous rows are left untouched.
+          </p>
+          <p className="text-xs text-muted">
+            Safe to run repeatedly — already-linked rows aren't reconsidered.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={runBackfill}
+            disabled={backfillRunning}
+            className="bg-accent text-bg px-4 py-1.5 rounded text-sm font-medium disabled:opacity-50"
+          >
+            {backfillRunning ? "Scanning logs…" : "Scan logs and backfill"}
+          </button>
+          {backfillErr && (
+            <div className="text-danger text-sm">{backfillErr}</div>
+          )}
+        </div>
+
+        {backfillResult && (
+          <div className="border-t border-border pt-4 text-sm space-y-1">
+            <div className="font-medium text-success">Backfill complete</div>
+            <ResultRow
+              label="Imported rows scanned"
+              value={backfillResult.total}
+            />
+            <ResultRow
+              label="Linked to a log file"
+              value={backfillResult.matched}
+            />
+            <ResultRow
+              label="Ambiguous (skipped)"
+              value={backfillResult.ambiguous}
+            />
+            <ResultRow
+              label="No log within window"
+              value={backfillResult.missing}
+            />
+            <ResultRow
+              label="Log files indexed"
+              value={backfillResult.logs_indexed}
+            />
+            <ResultRow label="Log directory" value={backfillResult.log_dir} />
           </div>
         )}
       </section>

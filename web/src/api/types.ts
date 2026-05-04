@@ -235,3 +235,12 @@ export interface ImportSnapshotResult {
   total: number;
   exported_at?: string;
 }
+
+export interface BackfillResult {
+  total: number;
+  matched: number;
+  ambiguous: number;
+  missing: number;
+  logs_indexed: number;
+  log_dir: string;
+}

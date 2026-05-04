@@ -1,5 +1,6 @@
 import type {
   AuthFile,
+  BackfillResult,
   DrainStatus,
   EventLogResponse,
   Filter,
@@ -156,6 +157,12 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: rawJson,
+    });
+  },
+
+  async backfillRequestIDs(): Promise<BackfillResult> {
+    return request<BackfillResult>("/usage/backfill-request-ids", {
+      method: "POST",
     });
   },
 

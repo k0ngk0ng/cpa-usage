@@ -96,6 +96,61 @@ func (s *Store) LatestUsageEventTimestamp(ctx context.Context) (time.Time, error
 	return row.Timestamp, nil
 }
 
+// ListImportedEventsMissingRequestID returns the lightweight stubs used by
+// the request-id backfill flow: every imported event (event_key prefixed
+// with "import:") that still lacks a request_id, ordered by timestamp so
+// callers can stream them against a sorted log-filename index.
+func (s *Store) ListImportedEventsMissingRequestID(ctx context.Context) ([]storage.ImportedEventStub, error) {
+	type row struct {
+		EventKey  string
+		Timestamp time.Time
+		Model     string
+	}
+	var rows []row
+	if err := s.dbCtx(ctx).
+		Model(&usageEventModel{}).
+		Select("event_key, timestamp, model").
+		Where("event_key LIKE ?", "import:%").
+		Where("request_id = ?", "").
+		Order("timestamp ASC").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]storage.ImportedEventStub, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, storage.ImportedEventStub{
+			EventKey:  r.EventKey,
+			Timestamp: r.Timestamp,
+			Model:     r.Model,
+		})
+	}
+	return out, nil
+}
+
+// UpdateImportedEventLink writes the matched request_id (and optional
+// endpoint hint) onto a previously imported event identified by event_key.
+// Endpoint is only overwritten when the column is currently empty so a
+// later real ingest cannot be clobbered by a coarse filename-derived hint.
+func (s *Store) UpdateImportedEventLink(ctx context.Context, eventKey, requestID, endpoint string) error {
+	updates := map[string]interface{}{"request_id": requestID}
+	q := s.dbCtx(ctx).
+		Model(&usageEventModel{}).
+		Where("event_key = ?", eventKey).
+		Updates(updates)
+	if q.Error != nil {
+		return q.Error
+	}
+	if endpoint != "" {
+		if err := s.dbCtx(ctx).
+			Model(&usageEventModel{}).
+			Where("event_key = ? AND endpoint = ?", eventKey, "").
+			Update("endpoint", endpoint).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // applyFilter returns a query scoped by the supplied UsageFilter.
 func (s *Store) applyFilter(ctx context.Context, f storage.UsageFilter) *gorm.DB {
 	q := s.dbCtx(ctx).Model(&usageEventModel{})

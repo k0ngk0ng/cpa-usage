@@ -66,6 +66,7 @@ func New(cfg RouterConfig) *gin.Engine {
 				protected.GET("/usage/events/:request_id/log/raw", usageEventLogRawHandler(cfg.Usage))
 				protected.GET("/usage/credentials", usageCredentialsHandler(cfg.Usage))
 				protected.POST("/usage/import", usageImportHandler(cfg.Usage))
+				protected.POST("/usage/backfill-request-ids", usageBackfillHandler(cfg.Usage))
 
 				protected.GET("/auth-files", authFilesHandler(cfg.Meta))
 				protected.GET("/provider-metadata", providerMetadataHandler(cfg.Meta))

@@ -191,6 +191,28 @@ func usageImportHandler(deps UsageDeps) gin.HandlerFunc {
 	}
 }
 
+// usageBackfillHandler scans CPA_LOG_DIR for per-request log filenames and
+// attaches a request_id (and endpoint hint) to imported events that still
+// lack one. Idempotent: events already linked are not in the candidate set.
+func usageBackfillHandler(deps UsageDeps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Store == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "storage not configured"})
+			return
+		}
+		if deps.LogReader == nil || deps.LogReader.Dir == "" {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "CPA_LOG_DIR is not configured"})
+			return
+		}
+		out, err := usage.Backfill(c.Request.Context(), deps.Store, deps.LogReader.Dir)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, out)
+	}
+}
+
 // usageEventLogRawHandler streams the raw CPA log file (unredacted by us; CPA
 // itself already shortens credential-bearing headers) so users can download
 // and inspect the original. Served as text/plain with a download disposition.

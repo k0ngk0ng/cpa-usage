@@ -25,6 +25,16 @@ type UsageEvent struct {
 	InsertedAt      time.Time
 }
 
+// ImportedEventStub is the minimal projection we need to backfill a request
+// log link onto a previously imported event: enough to match it against a
+// CPA log filename (timestamp), enough to disambiguate when multiple log
+// files fall in the time window (model), and the key required to update.
+type ImportedEventStub struct {
+	EventKey  string
+	Timestamp time.Time
+	Model     string
+}
+
 // AuthFile mirrors the CPA management /auth-files entries that we cache.
 type AuthFile struct {
 	AuthIndex   string

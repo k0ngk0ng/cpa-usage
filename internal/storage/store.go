@@ -17,6 +17,13 @@ type Store interface {
 	InsertUsageEvents(ctx context.Context, events []UsageEvent) (inserted int, deduped int, err error)
 	LatestUsageEventTimestamp(ctx context.Context) (time.Time, error)
 
+	// Backfill of imported (legacy snapshot) events that lack a request_id.
+	// ListImportedEventsMissingRequestID returns event_key + timestamp + model
+	// for every row whose event_key starts with "import:" and whose request_id
+	// is empty, so callers can match them against CPA per-request log files.
+	ListImportedEventsMissingRequestID(ctx context.Context) ([]ImportedEventStub, error)
+	UpdateImportedEventLink(ctx context.Context, eventKey, requestID, endpoint string) error
+
 	// Aggregations
 	BuildUsageOverview(ctx context.Context, f UsageFilter, prices map[string]ModelPriceSetting) (*UsageOverview, error)
 	ListUsageEvents(ctx context.Context, f UsageFilter, p Page, prices map[string]ModelPriceSetting) (*UsageEventsPage, error)
