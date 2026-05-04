@@ -8,6 +8,7 @@ import Events from "./pages/Events";
 import Credentials from "./pages/Credentials";
 import Pricing from "./pages/Pricing";
 import AuthFiles from "./pages/AuthFiles";
+import ImportPage from "./pages/Import";
 import { RefreshProvider } from "./lib/refresh";
 
 export default function App() {
@@ -41,6 +42,7 @@ export default function App() {
           <Route path="/credentials" element={<Credentials />} />
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/auth-files" element={<AuthFiles />} />
+          <Route path="/import" element={<ImportPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Layout>

@@ -228,3 +228,10 @@ export interface EventLogResponse {
   found: boolean;
   entry?: EventLogEntry;
 }
+
+export interface ImportSnapshotResult {
+  added: number;
+  skipped: number;
+  total: number;
+  exported_at?: string;
+}

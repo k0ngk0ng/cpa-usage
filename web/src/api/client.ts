@@ -3,6 +3,7 @@ import type {
   DrainStatus,
   EventLogResponse,
   Filter,
+  ImportSnapshotResult,
   ModelPriceSetting,
   PricingUpsertRequest,
   ProviderMetadata,
@@ -148,6 +149,14 @@ export const api = {
     return request<{ items: UsageCredentialStat[] }>(
       "/usage/credentials" + buildQuery(filter),
     );
+  },
+
+  async importSnapshot(rawJson: string): Promise<ImportSnapshotResult> {
+    return request<ImportSnapshotResult>("/usage/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: rawJson,
+    });
   },
 
   async authFiles(): Promise<{ items: AuthFile[] }> {

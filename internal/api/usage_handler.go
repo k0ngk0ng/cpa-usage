@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/k0ngk0ng/cpa-usage/internal/cpa"
+	"github.com/k0ngk0ng/cpa-usage/internal/ingest"
 	"github.com/k0ngk0ng/cpa-usage/internal/storage"
 	"github.com/k0ngk0ng/cpa-usage/internal/usage"
 )
@@ -17,8 +19,14 @@ import (
 // UsageDeps wires the usage handlers to the service layer.
 type UsageDeps struct {
 	Service   *usage.Service
+	Store     storage.Store
 	LogReader *cpa.LogReader
 }
+
+// maxImportBodyBytes caps the size of an uploaded export snapshot. The legacy
+// CPA snapshot is in-memory JSON and bounded by RAM; 64MiB comfortably covers
+// long-running instances with hundreds of thousands of details.
+const maxImportBodyBytes = 64 << 20
 
 func parseFilterFromQuery(c *gin.Context) (usage.Filter, error) {
 	rangeKey := c.Query("range")
@@ -140,6 +148,46 @@ func usageEventLogHandler(deps UsageDeps) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"found": true, "entry": entry})
+	}
+}
+
+// usageImportHandler accepts a JSON snapshot exported from the legacy CPA
+// `/v0/management/usage/export` endpoint and ingests its per-request details
+// into the events store. event_keys are content-hashed so re-uploads are
+// idempotent.
+func usageImportHandler(deps UsageDeps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Store == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "storage not configured"})
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxImportBodyBytes)
+		raw, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "snapshot too large or read failed: " + err.Error()})
+			return
+		}
+		env, err := ingest.DecodeSnapshot(raw)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		events := ingest.SnapshotToEvents(env)
+		if len(events) == 0 {
+			c.JSON(http.StatusOK, gin.H{"added": 0, "skipped": 0, "total": 0})
+			return
+		}
+		inserted, deduped, err := deps.Store.InsertUsageEvents(c.Request.Context(), events)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"added":       inserted,
+			"skipped":     deduped,
+			"total":       len(events),
+			"exported_at": env.ExportedAt,
+		})
 	}
 }
 

@@ -13,6 +13,7 @@ const NAV = [
   { to: "/credentials", label: "Credentials" },
   { to: "/pricing", label: "Pricing" },
   { to: "/auth-files", label: "Auth Files" },
+  { to: "/import", label: "Import" },
 ];
 
 interface Props {
