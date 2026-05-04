@@ -38,8 +38,11 @@ func (s *fakeBackfillStore) UpdateImportedEventLink(ctx context.Context, eventKe
 func TestBackfillStreamingDelay(t *testing.T) {
 	dir := t.TempDir()
 
-	// Three streamed events at 21:00:00, 21:01:00, 21:02:00 local (CST-style).
-	loc := time.FixedZone("CST", 8*3600)
+	// Three streamed events at 21:00:00, 21:01:00, 21:02:00 in whatever
+	// zone the test host is in. Using time.Local keeps the filename ts
+	// (parsed via ParseInLocation/time.Local) aligned with the REQUEST
+	// INFO timestamp instant, regardless of where CI runs.
+	loc := time.Local
 	requestTimes := []time.Time{
 		time.Date(2026, 5, 3, 21, 0, 0, 0, loc),
 		time.Date(2026, 5, 3, 21, 1, 0, 0, loc),
@@ -107,7 +110,7 @@ func TestBackfillStreamingDelay(t *testing.T) {
 // for low-traffic windows.
 func TestBackfillFallsBackToModelMatch(t *testing.T) {
 	dir := t.TempDir()
-	loc := time.FixedZone("CST", 8*3600)
+	loc := time.Local
 	rt := time.Date(2026, 5, 3, 21, 0, 0, 0, loc)
 	fnTS := rt.Add(15 * time.Second).Format("2006-01-02T150405")
 
