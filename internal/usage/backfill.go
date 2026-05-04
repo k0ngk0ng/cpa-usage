@@ -31,13 +31,27 @@ type BackfillResult struct {
 	LogDir     string `json:"log_dir"`
 }
 
+// BackfillStore is the narrow slice of storage.Store that Backfill needs.
+// Defined locally so tests can supply a minimal in-memory fake without
+// stubbing the full Store interface; storage.Store satisfies it directly.
+type BackfillStore interface {
+	ListImportedEventsMissingRequestID(ctx context.Context) ([]storage.ImportedEventStub, error)
+	UpdateImportedEventLink(ctx context.Context, eventKey, requestID, endpoint string) error
+}
+
 // Backfill walks the imported events that still lack a request_id and tries
-// to attach one by matching against CPA per-request log filenames in
-// logDir. The match window is ±2s around the event timestamp.
+// to attach one by matching against CPA per-request logs in logDir.
 //
-// Once a log entry is claimed by an event, it is removed from the in-memory
-// index so the same request_id cannot be assigned to two different events.
-func Backfill(ctx context.Context, store storage.Store, logDir string) (*BackfillResult, error) {
+// The event timestamp is the request-received time recorded by CPA's stats.
+// The log filename, however, is stamped at response-completion time and may
+// trail the event by tens of seconds for streaming responses. So we use an
+// asymmetric filename window for coarse pre-filtering, then disambiguate
+// by reading the precise `=== REQUEST INFO === Timestamp:` line out of each
+// candidate file and matching that to the event timestamp within ±1s.
+//
+// Once a log is claimed by an event, it is removed from the in-memory index
+// so the same request_id cannot be assigned to two different events.
+func Backfill(ctx context.Context, store BackfillStore, logDir string) (*BackfillResult, error) {
 	logDir = strings.TrimSpace(logDir)
 	if logDir == "" {
 		return nil, fmt.Errorf("CPA_LOG_DIR is not configured")
@@ -63,22 +77,25 @@ func Backfill(ctx context.Context, store storage.Store, logDir string) (*Backfil
 		return result, nil
 	}
 
-	const window = 2 * time.Second
+	const (
+		filenameLookback  = 5 * time.Second
+		filenameLookahead = 10 * time.Minute
+		matchTolerance    = time.Second
+	)
 	for _, ev := range stubs {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		candidates := idx.Around(ev.Timestamp, window)
+		candidates := idx.Range(
+			ev.Timestamp.Add(-filenameLookback),
+			ev.Timestamp.Add(filenameLookahead),
+		)
 		if len(candidates) == 0 {
 			result.Missing++
 			continue
 		}
-		var match *cpa.LogIndexEntry
-		switch len(candidates) {
-		case 1:
-			c := candidates[0]
-			match = &c
-		default:
+		match := pickByRequestReceived(idx, candidates, ev.Timestamp, matchTolerance)
+		if match == nil {
 			match = disambiguateByModel(candidates, ev.Model)
 		}
 		if match == nil {
@@ -92,6 +109,32 @@ func Backfill(ctx context.Context, store storage.Store, logDir string) (*Backfil
 		result.Matched++
 	}
 	return result, nil
+}
+
+// pickByRequestReceived returns the unique candidate whose log file's
+// `REQUEST INFO Timestamp:` is within tolerance of eventTS. Returns nil
+// when zero or multiple candidates qualify, leaving the caller free to
+// fall back to a coarser strategy.
+func pickByRequestReceived(idx *cpa.LogIndex, candidates []cpa.LogIndexEntry, eventTS time.Time, tolerance time.Duration) *cpa.LogIndexEntry {
+	var winner *cpa.LogIndexEntry
+	for i := range candidates {
+		got, ok := idx.RequestReceivedAt(candidates[i].RequestID)
+		if !ok {
+			continue
+		}
+		delta := got.Sub(eventTS)
+		if delta < 0 {
+			delta = -delta
+		}
+		if delta > tolerance {
+			continue
+		}
+		if winner != nil {
+			return nil
+		}
+		winner = &candidates[i]
+	}
+	return winner
 }
 
 // disambiguateByModel returns the unique candidate whose log file's request

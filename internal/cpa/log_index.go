@@ -10,8 +10,13 @@ import (
 )
 
 // LogIndexEntry is one CPA per-request log file located by filename only —
-// no file is opened. Timestamp is parsed from the filename in local time
-// because CPA writes the filename with `time.Now().Format("2006-01-02T150405")`.
+// no file is opened during indexing. Timestamp is parsed from the filename
+// in local time because CPA writes the filename with
+// `time.Now().Format("2006-01-02T150405")`.
+//
+// The filename timestamp reflects response-completion time, which can lag
+// the actual request-received time by tens of seconds for streaming
+// requests. Use LogIndex.RequestReceivedAt to get the precise time.
 type LogIndexEntry struct {
 	Path         string
 	Timestamp    time.Time
@@ -24,6 +29,11 @@ type LogIndexEntry struct {
 // falls inside a ±window of the supplied target.
 type LogIndex struct {
 	entries []LogIndexEntry
+
+	// reqInfoTSCache memoises ReadRequestReceivedAt by request_id. A cache
+	// hit with a zero time means we tried and failed, so callers don't
+	// re-open broken files.
+	reqInfoTSCache map[string]time.Time
 }
 
 const logFilenameTimeLayout = "2006-01-02T150405"
@@ -65,7 +75,10 @@ func BuildLogIndex(dir string) (*LogIndex, error) {
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Timestamp.Before(out[j].Timestamp) })
-	return &LogIndex{entries: out}, nil
+	return &LogIndex{
+		entries:        out,
+		reqInfoTSCache: make(map[string]time.Time),
+	}, nil
 }
 
 // Len reports the number of indexed entries.
@@ -102,6 +115,61 @@ func (idx *LogIndex) Around(target time.Time, window time.Duration) []LogIndexEn
 	return out
 }
 
+// Range returns the slice of entries whose filename timestamp is in
+// [start, end] (inclusive). Used for asymmetric pre-filtering when the
+// event timestamp is known to be the request-received time but the
+// filename reflects response-completion time, so the relevant log can
+// appear well after the event.
+func (idx *LogIndex) Range(start, end time.Time) []LogIndexEntry {
+	if idx == nil || len(idx.entries) == 0 {
+		return nil
+	}
+	if end.Before(start) {
+		return nil
+	}
+	lo := sort.Search(len(idx.entries), func(i int) bool {
+		return !idx.entries[i].Timestamp.Before(start)
+	})
+	out := make([]LogIndexEntry, 0, 4)
+	for i := lo; i < len(idx.entries); i++ {
+		if idx.entries[i].Timestamp.After(end) {
+			break
+		}
+		out = append(out, idx.entries[i])
+	}
+	return out
+}
+
+// RequestReceivedAt returns the request-received time recorded inside the
+// log file body for the given request_id, populating an internal cache on
+// first read. ok=false when the entry is unknown, the file is unreadable,
+// or the REQUEST INFO timestamp can't be parsed. Failed lookups are also
+// cached (as a zero time) so a broken log isn't reopened repeatedly.
+func (idx *LogIndex) RequestReceivedAt(requestID string) (time.Time, bool) {
+	if idx == nil || requestID == "" {
+		return time.Time{}, false
+	}
+	if t, ok := idx.reqInfoTSCache[requestID]; ok {
+		if t.IsZero() {
+			return time.Time{}, false
+		}
+		return t, true
+	}
+	for _, e := range idx.entries {
+		if e.RequestID != requestID {
+			continue
+		}
+		t, ok := ReadRequestReceivedAt(e.Path)
+		if !ok {
+			idx.reqInfoTSCache[requestID] = time.Time{}
+			return time.Time{}, false
+		}
+		idx.reqInfoTSCache[requestID] = t
+		return t, true
+	}
+	return time.Time{}, false
+}
+
 // Remove drops the entry with the given request_id (claimed match). No-op if
 // not present.
 func (idx *LogIndex) Remove(requestID string) {
@@ -111,7 +179,8 @@ func (idx *LogIndex) Remove(requestID string) {
 	for i, e := range idx.entries {
 		if e.RequestID == requestID {
 			idx.entries = append(idx.entries[:i], idx.entries[i+1:]...)
-			return
+			break
 		}
 	}
+	delete(idx.reqInfoTSCache, requestID)
 }

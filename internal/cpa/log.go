@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // LogReader locates and parses CPA per-request log files written under
@@ -343,6 +344,53 @@ func redactHeader(key, value string) string {
 		return maskCredential(value)
 	}
 	return value
+}
+
+// ReadRequestReceivedAt extracts the `Timestamp:` field from the
+// `=== REQUEST INFO ===` section of a CPA per-request log. CPA writes this
+// at request-received time, so it matches the timestamp recorded in the
+// usage stats — far more reliable than the filename timestamp, which is
+// stamped at response-completion time and may be 30+ seconds later for
+// streaming responses.
+//
+// Reads at most ~4 KiB so it is safe to call in a loop. Returns ok=false if
+// the section is absent or the timestamp cannot be parsed.
+func ReadRequestReceivedAt(path string) (time.Time, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return time.Time{}, false
+	}
+	defer f.Close()
+	buf := make([]byte, 4*1024)
+	n, _ := io.ReadFull(f, buf)
+	if n == 0 {
+		return time.Time{}, false
+	}
+	text := string(buf[:n])
+	const marker = "=== REQUEST INFO ==="
+	idx := strings.Index(text, marker)
+	if idx < 0 {
+		return time.Time{}, false
+	}
+	rest := text[idx+len(marker):]
+	if next := strings.Index(rest, "\n=== "); next >= 0 {
+		rest = rest[:next]
+	}
+	for _, line := range strings.Split(rest, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "Timestamp:") {
+			continue
+		}
+		v := strings.TrimSpace(line[len("Timestamp:"):])
+		if t, err := time.Parse(time.RFC3339Nano, v); err == nil {
+			return t, true
+		}
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			return t, true
+		}
+		return time.Time{}, false
+	}
+	return time.Time{}, false
 }
 
 func maskCredential(value string) string {
