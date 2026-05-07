@@ -94,7 +94,7 @@ export default function PricingPage() {
   const cols: Column<ModelPriceSetting>[] = [
     { header: "Model", cell: (r) => <span className="font-mono text-xs">{r.Model}</span> },
     { header: "INPUT /1M", align: "right", cell: (r) => `$${r.PromptPricePer1M}` },
-    { header: "Cache /1M", align: "right", cell: (r) => `$${r.CachePricePer1M}` },
+    { header: "CACHE /1M", align: "right", cell: (r) => `$${r.CachePricePer1M}` },
     { header: "OUTPUT /1M", align: "right", cell: (r) => `$${r.CompletionPricePer1M}` },
     { header: "Updated", cell: (r) => <span className="text-xs text-muted">{formatTimestamp(r.UpdatedAt)}</span> },
     {
@@ -140,7 +140,7 @@ export default function PricingPage() {
             onChange={(v) => setDraft({ ...draft, prompt_price_per_1m: v })}
           />
           <NumberField
-            label="Cache /1M"
+            label="CACHE /1M"
             value={draft.cache_price_per_1m}
             onChange={(v) => setDraft({ ...draft, cache_price_per_1m: v })}
           />
