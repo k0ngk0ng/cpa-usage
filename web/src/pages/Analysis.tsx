@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import FilterBar from "../components/FilterBar";
 import Table, { Column } from "../components/Table";
 import { api } from "../api/client";
-import { useFilter } from "../hooks/useFilter";
+import { todayFilter, useFilter } from "../hooks/useFilter";
 import { useRefreshTick } from "../lib/refresh";
 import { formatCost, formatNumber, pct } from "../lib/utils";
 import type { UsageAggregationRow, UsageAnalysis } from "../api/types";
@@ -43,7 +43,7 @@ const numericColumns = (): Column<UsageAggregationRow>[] => [
 ];
 
 export default function AnalysisPage() {
-  const { filter, setFilter } = useFilter();
+  const { filter, setFilter } = useFilter(todayFilter);
   const [data, setData] = useState<UsageAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -106,7 +106,7 @@ export default function AnalysisPage() {
 
   return (
     <div>
-      <FilterBar filter={filter} onChange={setFilter} />
+      <FilterBar filter={filter} onChange={setFilter} showApiKey />
       {err && (
         <div className="bg-danger/10 border border-danger/30 text-danger rounded-lg p-3 text-sm mb-4">
           {err}

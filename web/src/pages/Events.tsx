@@ -3,7 +3,7 @@ import FilterBar from "../components/FilterBar";
 import Table, { Column } from "../components/Table";
 import EventLogModal from "../components/EventLogModal";
 import { api } from "../api/client";
-import { useFilter } from "../hooks/useFilter";
+import { todayFilter, useFilter } from "../hooks/useFilter";
 import { useRefreshTick } from "../lib/refresh";
 import { formatCost, formatLatency, formatNumber, formatTimestamp } from "../lib/utils";
 import type { UsageEventRecord, UsageEventsPage } from "../api/types";
@@ -11,7 +11,7 @@ import type { UsageEventRecord, UsageEventsPage } from "../api/types";
 const PAGE_SIZES = [20, 50, 100, 500, 1000];
 
 export default function EventsPage() {
-  const { filter, setFilter } = useFilter();
+  const { filter, setFilter } = useFilter(todayFilter);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(100);
   const [data, setData] = useState<UsageEventsPage | null>(null);

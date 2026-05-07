@@ -4,13 +4,13 @@ import HealthGrid from "../components/HealthGrid";
 import MetricCard from "../components/MetricCard";
 import SeriesChart from "../components/SeriesChart";
 import { api } from "../api/client";
-import { useFilter } from "../hooks/useFilter";
+import { todayFilter, useFilter } from "../hooks/useFilter";
 import { useRefreshTick } from "../lib/refresh";
 import { formatCost, formatNumber, formatTokens, pct } from "../lib/utils";
 import type { UsageOverview } from "../api/types";
 
 export default function Overview() {
-  const { filter, setFilter } = useFilter();
+  const { filter, setFilter } = useFilter(todayFilter);
   const [data, setData] = useState<UsageOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -42,7 +42,7 @@ export default function Overview() {
 
   return (
     <div>
-      <FilterBar filter={filter} onChange={setFilter} />
+      <FilterBar filter={filter} onChange={setFilter} showApiKey />
 
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
         <MetricCard

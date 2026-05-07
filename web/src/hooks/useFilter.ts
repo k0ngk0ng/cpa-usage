@@ -10,6 +10,11 @@ export const defaultFilter: Filter = {
   result: "",
 };
 
+export const todayFilter: Filter = {
+  ...defaultFilter,
+  range: "today",
+};
+
 interface UseFilterResult {
   filter: Filter;
   setFilter: (next: Filter) => void;
@@ -23,7 +28,7 @@ interface UseFilterResult {
 }
 
 export function useFilter(initial: Filter = defaultFilter): UseFilterResult {
-  const [filter, setFilter] = useState<Filter>(initial);
+  const [filter, setFilter] = useState<Filter>(() => initial);
 
   const setRange = useCallback((r: RangeKey) => {
     setFilter((prev) => ({ ...prev, range: r }));
@@ -43,7 +48,7 @@ export function useFilter(initial: Filter = defaultFilter): UseFilterResult {
   const setCustomRange = useCallback((start: string, end: string) => {
     setFilter((prev) => ({ ...prev, range: "custom", start, end }));
   }, []);
-  const reset = useCallback(() => setFilter(defaultFilter), []);
+  const reset = useCallback(() => setFilter(initial), [initial]);
 
   return { filter, setFilter, setRange, setModels, setSources, setAuthIndex, setResult, setCustomRange, reset };
 }
