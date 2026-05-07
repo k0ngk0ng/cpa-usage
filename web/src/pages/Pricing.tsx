@@ -93,9 +93,9 @@ export default function PricingPage() {
 
   const cols: Column<ModelPriceSetting>[] = [
     { header: "Model", cell: (r) => <span className="font-mono text-xs">{r.Model}</span> },
-    { header: "Prompt /1M", align: "right", cell: (r) => `$${r.PromptPricePer1M}` },
-    { header: "Completion /1M", align: "right", cell: (r) => `$${r.CompletionPricePer1M}` },
+    { header: "INPUT /1M", align: "right", cell: (r) => `$${r.PromptPricePer1M}` },
     { header: "Cache /1M", align: "right", cell: (r) => `$${r.CachePricePer1M}` },
+    { header: "OUTPUT /1M", align: "right", cell: (r) => `$${r.CompletionPricePer1M}` },
     { header: "Updated", cell: (r) => <span className="text-xs text-muted">{formatTimestamp(r.UpdatedAt)}</span> },
     {
       header: "",
@@ -135,19 +135,19 @@ export default function PricingPage() {
             </datalist>
           </label>
           <NumberField
-            label="Prompt /1M"
+            label="INPUT /1M"
             value={draft.prompt_price_per_1m}
             onChange={(v) => setDraft({ ...draft, prompt_price_per_1m: v })}
-          />
-          <NumberField
-            label="Completion /1M"
-            value={draft.completion_price_per_1m}
-            onChange={(v) => setDraft({ ...draft, completion_price_per_1m: v })}
           />
           <NumberField
             label="Cache /1M"
             value={draft.cache_price_per_1m}
             onChange={(v) => setDraft({ ...draft, cache_price_per_1m: v })}
+          />
+          <NumberField
+            label="OUTPUT /1M"
+            value={draft.completion_price_per_1m}
+            onChange={(v) => setDraft({ ...draft, completion_price_per_1m: v })}
           />
         </div>
         <div className="flex items-center gap-3 mt-3">
