@@ -86,6 +86,7 @@ function buildQuery(filter: Filter, extra: Record<string, string | number | unde
   }
   for (const m of filter.models) sp.append("model", m);
   for (const s of filter.sources) sp.append("source", s);
+  for (const k of filter.apiKey) sp.append("api_key", k);
   if (filter.authIndex) sp.set("auth_index", filter.authIndex);
   if (filter.result) sp.set("result", filter.result);
   for (const [k, v] of Object.entries(extra)) {

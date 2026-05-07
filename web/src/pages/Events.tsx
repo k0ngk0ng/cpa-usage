@@ -123,7 +123,7 @@ export default function EventsPage() {
 
   return (
     <div>
-      <FilterBar filter={filter} onChange={setFilter} />
+      <FilterBar filter={filter} onChange={setFilter} showApiKey />
       {err && (
         <div className="bg-danger/10 border border-danger/30 text-danger rounded-lg p-3 text-sm mb-4">
           {err}

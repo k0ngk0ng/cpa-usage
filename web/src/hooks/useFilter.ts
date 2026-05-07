@@ -5,6 +5,7 @@ export const defaultFilter: Filter = {
   range: "24h",
   models: [],
   sources: [],
+  apiKey: [],
   authIndex: "",
   result: "",
 };

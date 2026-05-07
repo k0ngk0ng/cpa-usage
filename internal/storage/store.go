@@ -28,6 +28,7 @@ type Store interface {
 	BuildUsageOverview(ctx context.Context, f UsageFilter, prices map[string]ModelPriceSetting) (*UsageOverview, error)
 	ListUsageEvents(ctx context.Context, f UsageFilter, p Page, prices map[string]ModelPriceSetting) (*UsageEventsPage, error)
 	ListUsageEventFilterOptions(ctx context.Context, f UsageFilter) (*UsageEventFilterOptions, error)
+	ListUsageEventAPIKeys(ctx context.Context, f UsageFilter) ([]string, error)
 	ListUsageCredentialStats(ctx context.Context, f UsageFilter) ([]UsageCredentialStat, error)
 	ListUsageAnalysis(ctx context.Context, f UsageFilter, prices map[string]ModelPriceSetting) (*UsageAnalysis, error)
 

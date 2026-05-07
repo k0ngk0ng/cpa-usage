@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import clsx from "clsx";
 import { api } from "../api/client";
-import type { Filter, RangeKey, ResultFilter } from "../api/types";
+import type { Filter, RangeKey, ResultFilter, APIKeyFilterOption } from "../api/types";
 
 const RANGE_PRESETS: { key: RangeKey; label: string }[] = [
   { key: "today", label: "Today" },
@@ -19,21 +19,30 @@ interface Props {
   onChange: (next: Filter) => void;
   showResult?: boolean;
   showFacets?: boolean;
+  showApiKey?: boolean;
 }
 
-export default function FilterBar({ filter, onChange, showResult = true, showFacets = true }: Props) {
+export default function FilterBar({
+  filter,
+  onChange,
+  showResult = true,
+  showFacets = true,
+  showApiKey = false,
+}: Props) {
   const [models, setModels] = useState<string[]>([]);
   const [sources, setSources] = useState<string[]>([]);
+  const [apiKeyOptions, setApiKeyOptions] = useState<APIKeyFilterOption[]>([]);
 
   useEffect(() => {
     if (!showFacets) return;
     let cancelled = false;
     api
-      .eventFilters({ ...filter, models: [], sources: [], result: "" })
+      .eventFilters({ ...filter, models: [], sources: [], apiKey: [], result: "" })
       .then((opts) => {
         if (cancelled) return;
         setModels(opts.models || []);
         setSources(opts.sources || []);
+        setApiKeyOptions(opts.api_key_options || []);
       })
       .catch(() => {
         /* ignore */
@@ -98,6 +107,14 @@ export default function FilterBar({ filter, onChange, showResult = true, showFac
                 options={sources}
                 onChange={(v) => update({ sources: v })}
               />
+              {showApiKey && (
+                <KeyedMultiSelect
+                  label="API Key"
+                  values={filter.apiKey}
+                  options={apiKeyOptions.map((o) => ({ value: o.api_key, label: o.label }))}
+                  onChange={(v) => update({ apiKey: v })}
+                />
+              )}
               <input
                 type="text"
                 placeholder="auth_index"
@@ -135,6 +152,21 @@ function MultiSelect({
   options: string[];
   onChange: (v: string[]) => void;
 }) {
+  const keyed: { value: string; label: string }[] = options.map((opt) => ({ value: opt, label: opt }));
+  return <KeyedMultiSelect label={label} values={values} options={keyed} onChange={onChange} />;
+}
+
+function KeyedMultiSelect({
+  label,
+  values,
+  options,
+  onChange,
+}: {
+  label: string;
+  values: string[];
+  options: { value: string; label: string }[];
+  onChange: (v: string[]) => void;
+}) {
   const [open, setOpen] = useState(false);
   const summary = values.length === 0 ? `All ${label.toLowerCase()}s` : `${values.length} selected`;
   return (
@@ -163,18 +195,18 @@ function MultiSelect({
           </div>
           {options.length === 0 && <div className="text-xs text-muted">No options</div>}
           {options.map((opt) => {
-            const checked = values.includes(opt);
+            const checked = values.includes(opt.value);
             return (
-              <label key={opt} className="flex items-center gap-2 text-xs cursor-pointer">
+              <label key={opt.value} className="flex items-center gap-2 text-xs cursor-pointer">
                 <input
                   type="checkbox"
                   checked={checked}
                   onChange={() => {
-                    if (checked) onChange(values.filter((v) => v !== opt));
-                    else onChange([...values, opt]);
+                    if (checked) onChange(values.filter((v) => v !== opt.value));
+                    else onChange([...values, opt.value]);
                   }}
                 />
-                <span className="truncate">{opt}</span>
+                <span className="truncate">{opt.label}</span>
               </label>
             );
           })}

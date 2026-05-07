@@ -24,6 +24,7 @@ export interface Filter {
   end?: string;
   models: string[];
   sources: string[];
+  apiKey: string[];
   authIndex: string;
   result: ResultFilter;
 }
@@ -106,6 +107,12 @@ export interface UsageEventsPage {
 export interface UsageEventFilterOptions {
   models: string[];
   sources: string[];
+  api_key_options: APIKeyFilterOption[];
+}
+
+export interface APIKeyFilterOption {
+  api_key: string;
+  label: string;
 }
 
 export interface UsageCredentialStat {

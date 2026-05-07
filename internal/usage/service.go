@@ -48,6 +48,7 @@ type Filter struct {
 	Sources   []string
 	AuthIndex string
 	Result    string
+	APIKeys   []string
 }
 
 // Page mirrors storage.Page but is exposed at the service layer so handlers
@@ -59,13 +60,14 @@ type Page struct {
 
 // ParseFilter normalizes raw query-string values into a Filter.
 // `now` is injected so tests can pin the clock.
-func ParseFilter(rangeKey string, startStr, endStr string, models, sources []string, authIndex, result string, now time.Time) (Filter, error) {
+func ParseFilter(rangeKey string, startStr, endStr string, models, sources, apiKeys []string, authIndex, result string, now time.Time) (Filter, error) {
 	f := Filter{
 		Range:     strings.TrimSpace(rangeKey),
 		AuthIndex: strings.TrimSpace(authIndex),
 		Result:    strings.TrimSpace(result),
 		Models:    cleanList(models),
 		Sources:   cleanList(sources),
+		APIKeys:   cleanList(apiKeys),
 	}
 	if f.Range == "" {
 		f.Range = "all"
@@ -154,9 +156,25 @@ func (s *Service) Events(ctx context.Context, f Filter, p Page) (*storage.UsageE
 	return page, nil
 }
 
-// EventFilters returns distinct models + sources within the filter window.
+// EventFilters returns distinct models + sources + api_keys within the filter window.
 func (s *Service) EventFilters(ctx context.Context, f Filter) (*storage.UsageEventFilterOptions, error) {
-	return s.store.ListUsageEventFilterOptions(ctx, f.toStorage())
+	opts, err := s.store.ListUsageEventFilterOptions(ctx, f.toStorage())
+	if err != nil {
+		return nil, err
+	}
+	rawKeys, err := s.store.ListUsageEventAPIKeys(ctx, f.toStorage())
+	if err != nil {
+		return nil, err
+	}
+	apiNames, _ := s.lookupCaches(ctx)
+	opts.APIKeyOptions = make([]storage.APIKeyFilterOption, 0, len(rawKeys))
+	for _, key := range rawKeys {
+		opts.APIKeyOptions = append(opts.APIKeyOptions, storage.APIKeyFilterOption{
+			APIKey: key,
+			Label:  pickDisplay(apiNames, key),
+		})
+	}
+	return opts, nil
 }
 
 // Credentials returns the /usage/credentials payload with display names attached.
@@ -265,6 +283,7 @@ func (f Filter) toStorage() storage.UsageFilter {
 		Sources:   f.Sources,
 		AuthIndex: f.AuthIndex,
 		Result:    f.Result,
+		APIKeys:   f.APIKeys,
 	}
 }
 

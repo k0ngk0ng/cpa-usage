@@ -169,6 +169,9 @@ func (s *Store) applyFilter(ctx context.Context, f storage.UsageFilter) *gorm.DB
 	if f.AuthIndex != "" {
 		q = q.Where("auth_index = ?", f.AuthIndex)
 	}
+	if len(f.APIKeys) > 0 {
+		q = q.Where("api_key IN ?", f.APIKeys)
+	}
 	switch f.Result {
 	case "success":
 		q = q.Where("failed = ?", false)
@@ -269,6 +272,16 @@ func (s *Store) ListUsageEventFilterOptions(ctx context.Context, f storage.Usage
 		Models:  trimNonEmpty(models),
 		Sources: trimNonEmpty(sources),
 	}, nil
+}
+
+// ListUsageEventAPIKeys returns distinct raw api_key values within the filter window.
+func (s *Store) ListUsageEventAPIKeys(ctx context.Context, f storage.UsageFilter) ([]string, error) {
+	apiKeys := make([]string, 0)
+	q := s.applyFilter(ctx, f).Distinct("api_key").Order("api_key")
+	if err := q.Pluck("api_key", &apiKeys).Error; err != nil {
+		return nil, err
+	}
+	return trimNonEmpty(apiKeys), nil
 }
 
 // ListUsageCredentialStats groups by source + auth_index, separating success/failure.

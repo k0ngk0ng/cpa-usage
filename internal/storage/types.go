@@ -98,6 +98,7 @@ type UsageFilter struct {
 	Sources   []string
 	AuthIndex string
 	Result    string // "" | success | failed
+	APIKeys   []string
 }
 
 // HasRange reports whether the filter requests a bounded window.
@@ -144,8 +145,16 @@ type UsageEventRecord struct {
 
 // UsageEventFilterOptions is the facet response for the events listing UI.
 type UsageEventFilterOptions struct {
-	Models  []string `json:"models"`
-	Sources []string `json:"sources"`
+	Models       []string              `json:"models"`
+	Sources      []string              `json:"sources"`
+	APIKeyOptions []APIKeyFilterOption `json:"api_key_options"`
+}
+
+// APIKeyFilterOption is a raw api_key paired with its human-friendly display
+// name (alias or provider metadata label) for the events filter dropdown.
+type APIKeyFilterOption struct {
+	APIKey string `json:"api_key"`
+	Label  string `json:"label"`
 }
 
 // UsageCredentialStat is one row in /usage/credentials.
