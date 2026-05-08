@@ -6,8 +6,8 @@
 // Supported shapes:
 //   - Anthropic /v1/messages (messages: [{role, content: string | parts[]}], system)
 //   - OpenAI chat completions (messages: [{role, content}])
-//   - OpenAI Responses (input: [...], output: [...])
-//   - Gemini generateContent (contents: [{role, parts}])
+//   - OpenAI Responses (instructions, input: [...], output: [...])
+//   - Gemini generateContent (systemInstruction, contents: [{role, parts}])
 // SSE response shapes covered: Anthropic content_block_delta /
 // thinking_delta, OpenAI chat delta.content / delta.reasoning, OpenAI
 // Responses output_text.delta / reasoning_summary_text.delta, Gemini
@@ -31,16 +31,11 @@ export function extractRequestTurns(rawJson: string): Turn[] | null {
 
   const turns: Turn[] = [];
 
-  const sys = o.system;
-  if (typeof sys === "string" && sys.trim()) {
-    turns.push({ role: "system", text: sys });
-  } else if (Array.isArray(sys)) {
-    const text = sys
-      .map((p) => (typeof p === "string" ? p : (p as { text?: string })?.text || ""))
-      .filter(Boolean)
-      .join("\n");
-    if (text.trim()) turns.push({ role: "system", text });
-  }
+  appendInstructionTurn(turns, "system", o.system);
+  appendInstructionTurn(turns, "system", o.instructions);
+  appendInstructionTurn(turns, "system", o.systemInstruction);
+  appendInstructionTurn(turns, "system", o.system_instruction);
+  appendInstructionTurn(turns, "developer", o.developer);
 
   if (Array.isArray(o.messages)) {
     for (const m of o.messages) turns.push(messageToTurn(m));
@@ -57,6 +52,25 @@ export function extractRequestTurns(rawJson: string): Turn[] | null {
   }
 
   return turns.length > 0 ? turns : null;
+}
+
+function appendInstructionTurn(turns: Turn[], role: string, raw: unknown) {
+  const text = instructionToText(raw);
+  if (text.trim()) turns.push({ role, text });
+}
+
+function instructionToText(raw: unknown): string {
+  if (typeof raw === "string") return raw;
+  if (Array.isArray(raw)) {
+    return raw.map(instructionToText).filter(Boolean).join("\n");
+  }
+  if (!raw || typeof raw !== "object") return "";
+  const o = raw as Record<string, unknown>;
+  if (typeof o.text === "string") return o.text;
+  if (typeof o.content === "string") return o.content;
+  if (Array.isArray(o.content)) return o.content.map(instructionToText).filter(Boolean).join("\n");
+  if (Array.isArray(o.parts)) return o.parts.map(instructionToText).filter(Boolean).join("\n");
+  return "";
 }
 
 function messageToTurn(raw: unknown): Turn {
@@ -111,6 +125,8 @@ function messageToTurn(raw: unknown): Turn {
         attachments.push(type);
       }
     }
+  } else if (content && typeof content === "object") {
+    text = instructionToText(content);
   }
 
   return { role, text, attachments: attachments.length ? attachments : undefined };
