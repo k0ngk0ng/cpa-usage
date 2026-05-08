@@ -24,6 +24,20 @@ export function formatLatency(ms: number | undefined | null): string {
   return (ms / 60_000).toFixed(2) + "m";
 }
 
+export function formatBytes(bytes: number | undefined | null): string {
+  if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return "—";
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  if (unit === 0) return `${Math.round(value)} ${units[unit]}`;
+  const digits = value >= 100 ? 0 : value >= 10 ? 1 : 2;
+  return `${value.toFixed(digits)} ${units[unit]}`;
+}
+
 export function formatTimestamp(iso: string | undefined | null): string {
   if (!iso) return "—";
   const d = new Date(iso);

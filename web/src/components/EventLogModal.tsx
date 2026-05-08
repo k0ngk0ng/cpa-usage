@@ -4,7 +4,7 @@ import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api, HttpError } from "../api/client";
 import type { APIResponseAttempt, EventLogEntry, UsageEventRecord } from "../api/types";
-import { formatTimestamp } from "../lib/utils";
+import { formatBytes, formatTimestamp } from "../lib/utils";
 import {
   extractRequestTurns,
   extractResponseJSON,
@@ -188,6 +188,12 @@ function buildTabs(entry: EventLogEntry | null): Tab[] {
         <div className="mb-3">
           <Label>File</Label>
           <div className="font-mono text-[11px] break-all">{entry.file}</div>
+          <div
+            className="mt-1 text-[11px] text-muted font-mono"
+            title={entry.file_size_bytes != null ? `${entry.file_size_bytes.toLocaleString()} bytes` : undefined}
+          >
+            {formatBytes(entry.file_size_bytes)}
+          </div>
         </div>
         <div className="mb-3">
           <Label>Request info</Label>

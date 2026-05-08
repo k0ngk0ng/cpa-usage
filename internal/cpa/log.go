@@ -45,6 +45,7 @@ type APIResponse struct {
 // LogEntry is the structured view we hand to the API layer.
 type LogEntry struct {
 	File              string            `json:"file"`
+	FileSizeBytes     int64             `json:"file_size_bytes"`
 	Info              map[string]string `json:"info"`
 	Headers           map[string]string `json:"headers"`
 	RequestBody       string            `json:"request_body"`
@@ -117,13 +118,18 @@ func (r *LogReader) Read(path string) (*LogEntry, error) {
 		return nil, err
 	}
 	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
 
 	br := bufio.NewReaderSize(f, 64*1024)
 
 	entry := &LogEntry{
-		File:    filepath.Base(path),
-		Info:    map[string]string{},
-		Headers: map[string]string{},
+		File:          filepath.Base(path),
+		FileSizeBytes: st.Size(),
+		Info:          map[string]string{},
+		Headers:       map[string]string{},
 	}
 
 	// Section state. We stream the file, recognizing `=== NAME ===` markers
@@ -150,13 +156,13 @@ func (r *LogReader) Read(path string) (*LogEntry, error) {
 	respSub := respSubInfo
 
 	var (
-		reqBuf       strings.Builder
-		respBuf      strings.Builder
-		reqTrunc     bool
-		respTrunc    bool
-		headerBytes  int64
-		currentResp  *APIResponse
-		currentBody  strings.Builder
+		reqBuf      strings.Builder
+		respBuf     strings.Builder
+		reqTrunc    bool
+		respTrunc   bool
+		headerBytes int64
+		currentResp *APIResponse
+		currentBody strings.Builder
 	)
 
 	commitCurrentResp := func() {

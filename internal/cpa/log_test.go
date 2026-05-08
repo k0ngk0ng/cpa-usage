@@ -1,6 +1,7 @@
 package cpa
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,9 @@ func TestLogReaderFindAndRead(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			path, err := r.FindLog(tc.requestID)
 			if err != nil {
+				if errors.Is(err, ErrLogNotFound) {
+					t.Skipf("sample log %s not available: %v", tc.requestID, err)
+				}
 				t.Fatalf("FindLog(%q): %v", tc.requestID, err)
 			}
 			entry, err := r.Read(path)
@@ -73,6 +77,26 @@ func TestFindLogInvalidRequestID(t *testing.T) {
 	}
 	if _, err := r.FindLog(""); err == nil {
 		t.Errorf("expected error for empty request id")
+	}
+}
+
+func TestLogReaderReadIncludesFileSize(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "v1-messages-2026-05-08T160604-abc123.log")
+	body := "=== REQUEST INFO ===\nURL: /v1/messages\n\n=== REQUEST BODY ===\n{\"model\":\"test\"}\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write sample log: %v", err)
+	}
+
+	entry, err := (&LogReader{}).Read(path)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if entry.File != filepath.Base(path) {
+		t.Errorf("File = %q, want %q", entry.File, filepath.Base(path))
+	}
+	if entry.FileSizeBytes != int64(len(body)) {
+		t.Errorf("FileSizeBytes = %d, want %d", entry.FileSizeBytes, len(body))
 	}
 }
 

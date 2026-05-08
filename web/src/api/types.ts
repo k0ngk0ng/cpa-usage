@@ -222,6 +222,7 @@ export interface APIResponseAttempt {
 
 export interface EventLogEntry {
   file: string;
+  file_size_bytes?: number;
   info: Record<string, string>;
   headers: Record<string, string>;
   request_body: string;
