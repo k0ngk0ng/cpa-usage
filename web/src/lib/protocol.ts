@@ -79,6 +79,7 @@ function messageToTurn(raw: unknown): Turn {
   const content = m.content ?? m.text;
   let text = "";
   const attachments: string[] = [];
+  let imageCount = 0;
 
   const append = (chunk: string) => {
     if (!chunk) return;
@@ -107,20 +108,12 @@ function messageToTurn(raw: unknown): Turn {
         append(`**[tool_use ${name}]**\n\n\`\`\`json\n${input}\n\`\`\``);
       } else if (type === "tool_result") {
         const id = p.tool_use_id ? ` ${p.tool_use_id}` : "";
-        const c = typeof p.content === "string"
-          ? p.content
-          : Array.isArray(p.content)
-            ? p.content
-                .map((ci) =>
-                  ci && typeof ci === "object" && typeof (ci as { text?: string }).text === "string"
-                    ? (ci as { text: string }).text
-                    : JSON.stringify(ci),
-                )
-                .join("\n")
-            : JSON.stringify(p.content ?? "");
-        append(`**[tool_result${id}]**\n\n\`\`\`\n${c}\n\`\`\``);
-      } else if (type === "image" || type === "input_image") {
-        attachments.push("image");
+        const result = toolResultContentToMarkdown(p.content, "tool result image");
+        append(`**[tool_result${id}]**\n\n${result}`);
+      } else if (isImagePartType(type)) {
+        const md = imagePartToMarkdown(p, `image ${++imageCount}`);
+        if (md) append(md);
+        else attachments.push(describeImagePart(p));
       } else if (type) {
         attachments.push(type);
       }
@@ -130,6 +123,144 @@ function messageToTurn(raw: unknown): Turn {
   }
 
   return { role, text, attachments: attachments.length ? attachments : undefined };
+}
+
+function isImagePartType(type: string): boolean {
+  return type === "image" || type === "input_image" || type === "image_url";
+}
+
+function toolResultContentToMarkdown(raw: unknown, imageLabel: string): string {
+  if (typeof raw === "string") return fenceText(raw);
+  if (Array.isArray(raw)) {
+    const parts: string[] = [];
+    let imageCount = 0;
+    for (const item of raw) {
+      if (item && typeof item === "object") {
+        const p = item as Record<string, unknown>;
+        const type = String(p.type || "");
+        if (isImagePartType(type)) {
+          const md = imagePartToMarkdown(p, `${imageLabel} ${++imageCount}`);
+          parts.push(md || `_${describeImagePart(p)}_`);
+        } else if (typeof p.text === "string") {
+          parts.push(fenceText(p.text));
+        } else {
+          parts.push(fenceText(JSON.stringify(p, null, 2)));
+        }
+      } else {
+        parts.push(fenceText(String(item ?? "")));
+      }
+    }
+    return parts.join("\n\n") || "_(empty)_";
+  }
+  return fenceText(JSON.stringify(raw ?? "", null, 2));
+}
+
+function fenceText(text: string): string {
+  return `\`\`\`\n${text}\n\`\`\``;
+}
+
+function imagePartToMarkdown(part: Record<string, unknown>, alt: string): string | null {
+  const url = imageURLFromPart(part)?.trim();
+  if (!url || !isDisplayableImageURL(url)) return null;
+  return `![${escapeMarkdownAlt(alt)}](${url})`;
+}
+
+function imageURLFromPart(part: Record<string, unknown>): string | null {
+  const sourceURL = imageURLFromSource(part.source);
+  if (sourceURL) return sourceURL;
+
+  const imageURL = imageURLFromValue(part.image_url ?? part.imageUrl);
+  if (imageURL) return imageURL;
+
+  const inlineData = dataURLFromInlineData(part.inlineData ?? part.inline_data);
+  if (inlineData) return inlineData;
+
+  const mediaType = stringValue(part.media_type ?? part.mime_type ?? part.mimeType);
+  const data = stringValue(part.data);
+  if (mediaType && data) return dataToImageURL(mediaType, data);
+
+  const url = stringValue(part.url);
+  return url || null;
+}
+
+function imageURLFromSource(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object") return null;
+  const source = raw as Record<string, unknown>;
+  const url = stringValue(source.url);
+  if (url) return url;
+  const mediaType = stringValue(source.media_type ?? source.mime_type ?? source.mimeType);
+  const data = stringValue(source.data);
+  return mediaType && data ? dataToImageURL(mediaType, data) : null;
+}
+
+function imageURLFromValue(raw: unknown): string | null {
+  if (typeof raw === "string") return raw;
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  return stringValue(o.url) || null;
+}
+
+function dataURLFromInlineData(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const mediaType = stringValue(o.mimeType ?? o.mime_type ?? o.media_type);
+  const data = stringValue(o.data);
+  return mediaType && data ? dataToImageURL(mediaType, data) : null;
+}
+
+function dataToImageURL(mediaType: string, data: string): string | null {
+  const trimmed = data.trim();
+  if (trimmed.startsWith("data:")) return trimmed;
+  const normalized = normalizeRasterMediaType(mediaType);
+  if (!normalized) return null;
+  const payload = trimmed.replace(/\s+/g, "");
+  return isBase64Payload(payload) ? `data:${normalized};base64,${payload}` : null;
+}
+
+function isDisplayableImageURL(url: string): boolean {
+  const trimmed = url.trim();
+  return isSafeDataImageURL(trimmed) || /^https?:\/\//i.test(trimmed);
+}
+
+export function isSafeDataImageURL(url: string): boolean {
+  const match = /^data:([^;,]+);base64,/i.exec(url);
+  if (!match || !normalizeRasterMediaType(match[1])) return false;
+  return isBase64Payload(url.slice(match[0].length));
+}
+
+function normalizeRasterMediaType(raw: string): string | null {
+  const mediaType = raw.trim().toLowerCase();
+  if (mediaType === "image/jpg") return "image/jpeg";
+  if (
+    mediaType === "image/png" ||
+    mediaType === "image/jpeg" ||
+    mediaType === "image/gif" ||
+    mediaType === "image/webp"
+  ) {
+    return mediaType;
+  }
+  return null;
+}
+
+function isBase64Payload(value: string): boolean {
+  return value.length > 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(value);
+}
+
+function describeImagePart(part: Record<string, unknown>): string {
+  const fileID = stringValue(part.file_id ?? part.fileId);
+  if (fileID) return `image file ${fileID}`;
+  const mediaType = stringValue(
+    (part.source as Record<string, unknown> | undefined)?.media_type ?? part.media_type,
+  );
+  return mediaType ? `image ${mediaType}` : "image";
+}
+
+function escapeMarkdownAlt(value: string): string {
+  return value.replace(/[\[\]\r\n]+/g, " ").trim() || "image";
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
 
 // responsesInputToTurn handles the OpenAI Responses `input[]` mixed-item
@@ -178,19 +309,31 @@ function geminiContentToTurn(raw: unknown): Turn {
   const m = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const role = String(m.role || "user");
   const parts = Array.isArray(m.parts) ? m.parts : [];
-  const text = parts
-    .map((p) => (p && typeof p === "object" ? (p as { text?: string }).text || "" : ""))
-    .filter(Boolean)
-    .join("\n\n");
-  const attachments = parts
-    .filter((p) => p && typeof p === "object" && !(p as { text?: string }).text)
-    .map((p) => {
-      const o = p as Record<string, unknown>;
-      if (o.inlineData) return "inline data";
-      if (o.functionCall) return `function_call ${(o.functionCall as { name?: string })?.name || ""}`;
-      if (o.functionResponse) return "function_response";
-      return Object.keys(o).join(",") || "part";
-    });
+  let text = "";
+  const attachments: string[] = [];
+  let imageCount = 0;
+  const append = (chunk: string) => {
+    if (!chunk) return;
+    text += (text ? "\n\n" : "") + chunk;
+  };
+
+  for (const p of parts) {
+    if (!p || typeof p !== "object") continue;
+    const o = p as Record<string, unknown>;
+    if (typeof o.text === "string") {
+      append(o.text);
+      continue;
+    }
+    const md = imagePartToMarkdown(o, `image ${++imageCount}`);
+    if (md) {
+      append(md);
+      continue;
+    }
+    if (o.inlineData) attachments.push("inline data");
+    else if (o.functionCall) attachments.push(`function_call ${(o.functionCall as { name?: string })?.name || ""}`);
+    else if (o.functionResponse) attachments.push("function_response");
+    else attachments.push(Object.keys(o).join(",") || "part");
+  }
   return { role, text, attachments: attachments.length ? attachments : undefined };
 }
 
@@ -436,6 +579,12 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
         const sep = out.content ? "\n\n" : "";
         out.content += `${sep}**[tool_use ${name}]**\n\n\`\`\`json\n${input}\n\`\`\``;
         out.detected = true;
+      } else if (isImagePartType(String(p.type || ""))) {
+        const md = imagePartToMarkdown(p, "image");
+        if (md) {
+          appendResponseMarkdown(out, md);
+          out.detected = true;
+        }
       }
     }
   }
@@ -449,6 +598,21 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
       if (typeof msg.content === "string" && msg.content) {
         out.content += msg.content;
         out.detected = true;
+      } else if (Array.isArray(msg.content)) {
+        for (const part of msg.content) {
+          if (!part || typeof part !== "object") continue;
+          const p = part as Record<string, unknown>;
+          if ((p.type === "text" || p.type === "output_text") && typeof p.text === "string") {
+            appendResponseMarkdown(out, p.text);
+            out.detected = true;
+          } else if (isImagePartType(String(p.type || ""))) {
+            const md = imagePartToMarkdown(p, "image");
+            if (md) {
+              appendResponseMarkdown(out, md);
+              out.detected = true;
+            }
+          }
+        }
       }
       if (typeof msg.reasoning === "string" && msg.reasoning) {
         out.thinking += msg.reasoning;
@@ -472,6 +636,15 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
         out.detected = true;
         continue;
       }
+      if (it.type === "image_generation_call" && typeof it.result === "string") {
+        const mimeType = stringValue(it.mime_type ?? it.media_type) || "image/png";
+        const url = dataToImageURL(mimeType, it.result);
+        if (url) {
+          appendResponseMarkdown(out, `![generated image](${url})`);
+          out.detected = true;
+        }
+        continue;
+      }
       const c = it.content;
       if (Array.isArray(c)) {
         for (const part of c) {
@@ -480,6 +653,12 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
           if ((p.type === "output_text" || p.type === "text") && typeof p.text === "string") {
             out.content += p.text;
             out.detected = true;
+          } else if (isImagePartType(String(p.type || ""))) {
+            const md = imagePartToMarkdown(p, "image");
+            if (md) {
+              appendResponseMarkdown(out, md);
+              out.detected = true;
+            }
           }
         }
       }
@@ -494,6 +673,11 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
   }
 
   return out.detected ? out : null;
+}
+
+function appendResponseMarkdown(out: StreamExtraction, chunk: string) {
+  if (!chunk) return;
+  out.content += (out.content ? "\n\n" : "") + chunk;
 }
 
 // turnsToMarkdown renders a list of conversation turns as a single markdown

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api, HttpError } from "../api/client";
 import type { APIResponseAttempt, EventLogEntry, UsageEventRecord } from "../api/types";
@@ -9,6 +9,7 @@ import {
   extractRequestTurns,
   extractResponseJSON,
   extractResponseStream,
+  isSafeDataImageURL,
   streamToMarkdown,
   turnsToMarkdown,
 } from "../lib/protocol";
@@ -421,9 +422,16 @@ function ToggleButton({
 function MarkdownView({ markdown }: { markdown: string }) {
   return (
     <div className="bg-panel border border-border rounded p-3 prose-md">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={markdownUrlTransform}>
+        {markdown}
+      </ReactMarkdown>
     </div>
   );
+}
+
+function markdownUrlTransform(url: string, key: string): string {
+  if (key === "src" && isSafeDataImageURL(url)) return url;
+  return defaultUrlTransform(url);
 }
 
 function statusTone(status: number): "ok" | "warn" | "danger" | "muted" {
