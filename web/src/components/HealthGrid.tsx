@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import clsx from "clsx";
 import type { HealthCell } from "../api/types";
 import { formatTimestamp } from "../lib/utils";
@@ -7,14 +8,14 @@ interface Props {
   grid: HealthCell[][];
 }
 
-function cellTone(cell: HealthCell): string {
+function cellTone(cell: HealthCell, maxTotal: number): string {
   if (cell.total === 0) return "bg-panel2";
   const failRate = cell.failed / cell.total;
   if (failRate >= 0.5) return "bg-danger/80";
   if (failRate > 0) return "bg-warn/70";
-  // success — gradient by volume
-  if (cell.total >= 50) return "bg-success";
-  if (cell.total >= 10) return "bg-success/70";
+  const intensity = maxTotal > 0 ? cell.total / maxTotal : 0;
+  if (intensity >= 0.66) return "bg-success";
+  if (intensity >= 0.33) return "bg-success/70";
   return "bg-success/40";
 }
 
@@ -26,46 +27,91 @@ export default function HealthGrid({ grid }: Props) {
       </div>
     );
   }
+  const days = grid.map((day) => ({
+    label: dayLabel(day),
+    hours: hourlyCells(day),
+  }));
+  const maxTotal = Math.max(0, ...days.flatMap((day) => day.hours.map((cell) => cell.total)));
+
   return (
     <div className="bg-panel border border-border rounded-lg p-4">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-medium">7-day request health</h3>
+        <h3 className="text-sm font-medium">7-day request health by hour</h3>
         <Legend />
       </div>
-      <div className="space-y-1">
-        {grid.map((day, di) => (
-          <div key={di} className="flex items-center gap-2">
-            <div className="w-12 shrink-0 text-[10px] text-muted text-right tabular-nums">
-              {dayLabel(day)}
+      <div className="overflow-x-auto pb-1">
+        <div
+          className="inline-grid items-center gap-[3px]"
+          style={{ gridTemplateColumns: `3rem repeat(${days.length}, 2.75rem)` }}
+        >
+          <div />
+          {days.map((day, di) => (
+            <div key={di} className="whitespace-pre-line text-center text-[10px] leading-tight text-muted tabular-nums">
+              {day.label}
             </div>
-            <div className="grid grid-cols-[repeat(96,minmax(0,1fr))] gap-[2px] flex-1">
-              {day.map((cell, ci) => (
-                <div
-                  key={ci}
-                  className={clsx("h-3 rounded-[2px]", cellTone(cell))}
-                  title={`${formatTimestamp(cell.bucket)} — ${cell.total} requests, ${cell.failed} failed`}
-                />
-              ))}
-            </div>
-          </div>
-        ))}
+          ))}
+          {Array.from({ length: 24 }, (_, hour) => (
+            <Fragment key={hour}>
+              <div className="h-4 pr-2 text-right text-[10px] leading-4 text-muted tabular-nums">
+                {hourTickLabel(hour)}
+              </div>
+              {days.map((day, di) => {
+                const cell = day.hours[hour];
+                return (
+                  <div key={`${di}-${hour}`} className="flex h-4 items-center justify-center">
+                    <div
+                      className={clsx("h-4 w-4 rounded-[3px]", cellTone(cell, maxTotal))}
+                      title={`${day.label} ${hourLabel(hour)} — ${cell.total} requests, ${cell.failed} failed${
+                        cell.bucket ? ` (${formatTimestamp(cell.bucket)})` : ""
+                      }`}
+                    />
+                  </div>
+                );
+              })}
+            </Fragment>
+          ))}
+        </div>
       </div>
     </div>
   );
+}
+
+function hourlyCells(day: HealthCell[]): HealthCell[] {
+  return Array.from({ length: 24 }, (_, hour) => {
+    const cells = day.slice(hour * 4, hour * 4 + 4);
+    return {
+      bucket: cells[0]?.bucket ?? "",
+      total: cells.reduce((sum, cell) => sum + cell.total, 0),
+      failed: cells.reduce((sum, cell) => sum + cell.failed, 0),
+    };
+  });
 }
 
 function dayLabel(day: HealthCell[]): string {
   if (day.length === 0) return "";
   const d = new Date(day[0].bucket);
   if (Number.isNaN(d.getTime())) return "";
-  return `${d.getMonth() + 1}/${d.getDate()}`;
+  return `${weekdayLabel(d)}\n${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+function weekdayLabel(d: Date): string {
+  return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()];
+}
+
+function hourLabel(hour: number): string {
+  return `${String(hour).padStart(2, "0")}:00-${String((hour + 1) % 24).padStart(2, "0")}:00`;
+}
+
+function hourTickLabel(hour: number): string {
+  return hour % 3 === 0 ? `${String(hour).padStart(2, "0")}:00` : "";
 }
 
 function Legend() {
   const items = [
     { tone: "bg-panel2", label: "no traffic" },
-    { tone: "bg-success/40", label: "low" },
-    { tone: "bg-success", label: "high" },
+    { tone: "bg-success/40", label: "less" },
+    { tone: "bg-success/70", label: "more" },
+    { tone: "bg-success", label: "most" },
     { tone: "bg-warn/70", label: "some failures" },
     { tone: "bg-danger/80", label: "many failures" },
   ];

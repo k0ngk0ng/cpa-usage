@@ -38,6 +38,7 @@ export function extractRequestTurns(rawJson: string): Turn[] | null {
   appendInstructionTurn(turns, "system", o.systemInstruction);
   appendInstructionTurn(turns, "system", o.system_instruction);
   appendInstructionTurn(turns, "developer", o.developer);
+  appendToolDeclarationTurn(turns, o.tools);
 
   if (Array.isArray(o.messages)) {
     for (const m of o.messages) turns.push(messageToTurn(m));
@@ -123,21 +124,99 @@ function messageToTurn(raw: unknown): Turn {
         if (md) append(md);
         else attachments.push(describeImagePart(p));
       } else if (type) {
-        attachments.push(type);
+        append(typedItemMarkdown(p, type));
       }
     }
   } else if (content && typeof content === "object") {
     text = instructionToText(content);
   }
 
+  append(toolCallsMarkdown(m.tool_calls));
+  append(legacyFunctionCallMarkdown(m.function_call));
+
   if (!explicitRole && type && type !== "message" && !text && attachments.length === 0) {
     return typedItemToTurn(m, type);
+  }
+  if (!text && attachments.length === 0) {
+    const fallback = messageFallbackMarkdown(m, type || "message");
+    if (fallback) return { role, text: fallback };
   }
   return { role, text, attachments: attachments.length ? attachments : undefined };
 }
 
 function isImagePartType(type: string): boolean {
   return type === "image" || type === "input_image" || type === "image_url";
+}
+
+function toolCallsMarkdown(raw: unknown): string {
+  if (!Array.isArray(raw) || raw.length === 0) return "";
+  return raw
+    .map((call, index) => toolCallMarkdown(call, index))
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function toolCallMarkdown(raw: unknown, index: number): string {
+  if (!raw || typeof raw !== "object") {
+    return toolUseMarkdown(`tool_${index + 1}`, undefined, JSON.stringify(raw ?? "", null, 2), "json");
+  }
+  const call = raw as Record<string, unknown>;
+  const fn = objectValue(call.function);
+  const name = stringValue(fn?.name) || stringValue(call.name) || stringValue(call.type) || `tool_${index + 1}`;
+  const args = fn && "arguments" in fn ? fn.arguments : call.arguments ?? call.input ?? call;
+  const input = typeof args === "string" ? formatPartialJSON(args) : JSON.stringify(args ?? {}, null, 2);
+  return toolUseMarkdown(name, call.id ?? call.call_id ?? call.tool_call_id, input, "json");
+}
+
+function legacyFunctionCallMarkdown(raw: unknown): string {
+  const call = objectValue(raw);
+  if (!call) return "";
+  const name = stringValue(call.name) || "function";
+  const args = "arguments" in call ? call.arguments : call;
+  const input = typeof args === "string" ? formatPartialJSON(args) : JSON.stringify(args ?? {}, null, 2);
+  return toolUseMarkdown(name, undefined, input, "json");
+}
+
+function messageFallbackMarkdown(message: Record<string, unknown>, type: string): string {
+  const meaningfulKeys = Object.keys(message).filter((key) => {
+    if (key === "role" || key === "content" || key === "text") return false;
+    const value = message[key];
+    if (value == null) return false;
+    return !Array.isArray(value) || value.length > 0;
+  });
+  return meaningfulKeys.length ? typedItemMarkdown(message, type) : "";
+}
+
+function appendToolDeclarationTurn(turns: Turn[], raw: unknown) {
+  if (!Array.isArray(raw) || raw.length === 0) return;
+  turns.push({
+    role: "tool",
+    text: toolDeclarationsMarkdown(raw),
+  });
+}
+
+function toolDeclarationsMarkdown(tools: unknown[]): string {
+  const names = tools
+    .map((tool, index) => toolDeclarationLabel(tool, index))
+    .filter(Boolean);
+  const summary = names.map((name) => `- ${name}`).join("\n");
+  return [
+    `**[tools ${tools.length}]**`,
+    summary,
+    codeFence(JSON.stringify(tools, null, 2), "json"),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function toolDeclarationLabel(tool: unknown, index: number): string {
+  if (!tool || typeof tool !== "object") return `tool ${index + 1}`;
+  const o = tool as Record<string, unknown>;
+  const fn = objectValue(o.function);
+  const name = stringValue(o.name) || stringValue(fn?.name);
+  const type = stringValue(o.type);
+  const label = name || type || `tool ${index + 1}`;
+  return type && name && type !== name ? `${name} (${type})` : label;
 }
 
 function toolResultContentToMarkdown(raw: unknown, imageLabel: string): string {
@@ -497,6 +576,7 @@ interface AnthropicBlock {
   index: number;
   type: string;
   name?: string;
+  raw: Record<string, unknown>;
   text: string;
   partialJSON: string;
   encrypted?: boolean;
@@ -557,6 +637,7 @@ export function extractResponseStream(text: string): StreamExtraction {
         index: idx,
         type,
         name: typeof block.name === "string" ? block.name : undefined,
+        raw: block,
         text: "",
         partialJSON: "",
         encrypted: hasEncryptedReasoning(block),
@@ -740,6 +821,15 @@ export function extractResponseStream(text: string): StreamExtraction {
       const name = b.name || "tool";
       const sep = out.content ? "\n\n" : "";
       out.content += sep + toolUseMarkdown(name, undefined, json, "json");
+    } else {
+      const raw = {
+        ...b.raw,
+        type: b.type,
+        ...(b.name ? { name: b.name } : {}),
+        ...(b.text ? { text: b.text } : {}),
+        ...(b.partialJSON ? { partial_json: b.partialJSON } : {}),
+      };
+      appendResponseMarkdown(out, typedItemMarkdown(raw, b.type));
     }
   }
 
@@ -811,6 +901,9 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
           appendResponseMarkdown(out, md);
           out.detected = true;
         }
+      } else if (p.type) {
+        appendResponseMarkdown(out, typedItemMarkdown(p, String(p.type)));
+        out.detected = true;
       }
     }
   }
