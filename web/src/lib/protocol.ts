@@ -347,6 +347,12 @@ function responsesInputToTurn(raw: unknown): Turn {
     }
     return { role: "assistant", text: "", attachments: ["reasoning"] };
   }
+  if (type === "web_search_call") {
+    return {
+      role: "assistant",
+      text: webSearchCallMarkdown(m),
+    };
+  }
   return typedItemToTurn(m, type);
 }
 
@@ -379,6 +385,36 @@ function typedItemDetails(item: Record<string, unknown>): string {
   return details.join("\n");
 }
 
+function webSearchCallMarkdown(item: Record<string, unknown>): string {
+  const action = objectValue(item.action);
+  const actionType = stringValue(action?.type) || "web_search";
+  const lines: string[] = [];
+
+  const status = stringValue(item.status);
+  if (status) lines.push(`- status: ${status}`);
+  lines.push(`- action: ${actionType}`);
+
+  const query = stringValue(action?.query);
+  if (query) lines.push(`- query: ${query}`);
+
+  const url = stringValue(action?.url);
+  if (url) lines.push(`- url: ${url}`);
+
+  const pattern = stringValue(action?.pattern);
+  if (pattern) lines.push(`- pattern: ${pattern}`);
+
+  const sources = Array.isArray(action?.sources) ? action.sources.length : 0;
+  if (sources > 0) lines.push(`- sources: ${sources}`);
+
+  return [
+    `**[web_search_call ${actionType}]**`,
+    lines.join("\n"),
+    codeFence(JSON.stringify(item, null, 2), "json"),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 function objectValue(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -393,6 +429,7 @@ function isKnownResponsesOutputType(type: string): boolean {
     type === "function_call_output" ||
     type === "custom_tool_call_output" ||
     type === "image_generation_call" ||
+    type === "web_search_call" ||
     type === "reasoning"
   );
 }
@@ -636,6 +673,8 @@ export function extractResponseStream(text: string): StreamExtraction {
           order: existing?.order ?? openAICallOrder++,
           custom: item.type === "custom_tool_call" || existing?.custom,
         });
+      } else if (itemType === "web_search_call") {
+        appendResponseMarkdown(out, webSearchCallMarkdown(item));
       } else if (itemType && !isKnownResponsesOutputType(itemType)) {
         appendResponseMarkdown(out, typedItemMarkdown(item, itemType));
       }
@@ -863,6 +902,11 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
           markHidden(out, "reasoning");
           out.detected = true;
         }
+        continue;
+      }
+      if (it.type === "web_search_call") {
+        appendResponseMarkdown(out, webSearchCallMarkdown(it));
+        out.detected = true;
         continue;
       }
       const itemType = stringValue(it.type);

@@ -439,7 +439,7 @@ function BodyView({ raw, kind }: { raw: string; kind: "request" | "response" }) 
 
   return (
     <div className="space-y-2">
-      <div className="sticky top-0 z-10 -mx-1 flex items-center gap-1 bg-panel2/95 px-1 py-1 backdrop-blur">
+      <div className="sticky top-0 z-10 -mx-3 -mt-3 flex items-center gap-1 border-b border-border bg-panel2/95 px-3 py-2 backdrop-blur">
         <ToggleButton
           active={mode === "pretty"}
           disabled={!projection}
@@ -484,7 +484,7 @@ function FinalChatView({
 
   return (
     <div className="space-y-2">
-      <div className="sticky top-0 z-10 -mx-1 flex items-center gap-1 bg-panel2/95 px-1 py-1 backdrop-blur">
+      <div className="sticky top-0 z-10 -mx-3 -mt-3 flex items-center gap-1 border-b border-border bg-panel2/95 px-3 py-2 backdrop-blur">
         <ToggleButton
           active={mode === "pretty"}
           disabled={!turns.length}
@@ -638,7 +638,9 @@ function ChatView({ turns }: { turns: Turn[] }) {
           >
             <div className={clsx("chat-bubble", bubbleClass, collapsed && "chat-bubble-collapsed")}>
               <div className="chat-meta">
-                <span className={clsx("role-badge", roleBadgeClass(turn.role))}>{turn.role}</span>
+                <span className={clsx("role-badge", isTool ? "role-badge-tool" : roleBadgeClass(turn.role))}>
+                  {turn.role}
+                </span>
                 <span className="chat-turn">#{index + 1}</span>
                 {isTool && (
                   <button className="chat-toggle" onClick={() => toggleTool(index)}>
@@ -675,13 +677,21 @@ function ChatView({ turns }: { turns: Turn[] }) {
 function isToolTurn(turn: Turn): boolean {
   if (turn.role.toLowerCase() === "tool") return true;
   const text = turnText(turn).trimStart();
-  if (startsWithToolBlock(text)) return true;
+  if (startsWithCollapsibleBlock(text)) return true;
   const hiddenThinking = /^\*\*Thinking\*\*\s+_\((?:reasoning|thinking|redacted_thinking)\)_\s+(?:---\s+)?/s.exec(text);
-  return hiddenThinking ? startsWithToolBlock(text.slice(hiddenThinking[0].length).trimStart()) : false;
+  return hiddenThinking ? startsWithCollapsibleBlock(text.slice(hiddenThinking[0].length).trimStart()) : false;
+}
+
+function startsWithCollapsibleBlock(text: string): boolean {
+  return startsWithToolBlock(text) || startsWithWebSearchCallBlock(text);
 }
 
 function startsWithToolBlock(text: string): boolean {
   return text.startsWith("**[tool_use ") || text.startsWith("**[tool_result");
+}
+
+function startsWithWebSearchCallBlock(text: string): boolean {
+  return text.startsWith("**[web_search_call ");
 }
 
 function chatPreview(turn: Turn): string {
