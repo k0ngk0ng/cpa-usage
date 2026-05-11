@@ -14,6 +14,7 @@ export type RangeKey =
   | "12h"
   | "24h"
   | "7d"
+  | "30d"
   | "custom";
 
 export type ResultFilter = "" | "success" | "failed";

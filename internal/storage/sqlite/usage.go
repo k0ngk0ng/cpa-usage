@@ -432,7 +432,7 @@ func costFromTotals(model string, input, output, cached int64, prices map[string
 	return computeCost(model, input, output, cached, prices)
 }
 
-// BuildUsageOverview returns the summary, hourly+daily series and a 30×96 health grid.
+// BuildUsageOverview returns the summary, hourly+daily series and a range-sized 15-minute health grid.
 func (s *Store) BuildUsageOverview(ctx context.Context, f storage.UsageFilter, prices map[string]storage.ModelPriceSetting) (*storage.UsageOverview, error) {
 	now := time.Now().UTC()
 
@@ -581,8 +581,16 @@ func (s *Store) bucketSeriesDaily(ctx context.Context, f storage.UsageFilter, no
 func (s *Store) healthGrid(ctx context.Context, f storage.UsageFilter, now time.Time) ([][]storage.HealthCell, error) {
 	healthFilter := f
 	end := startOfDay(now).Add(24 * time.Hour)
-	healthFilter.End = end
-	healthFilter.Start = end.Add(-30 * 24 * time.Hour)
+	if healthFilter.HasRange() {
+		healthFilter.Start = startOfDay(healthFilter.Start)
+		healthFilter.End = startOfDay(healthFilter.End.Add(-time.Nanosecond)).Add(24 * time.Hour)
+		if healthFilter.End.Sub(healthFilter.Start) > 30*24*time.Hour {
+			healthFilter.Start = healthFilter.End.Add(-30 * 24 * time.Hour)
+		}
+	} else {
+		healthFilter.End = end
+		healthFilter.Start = end.Add(-30 * 24 * time.Hour)
+	}
 	type row struct {
 		Bucket string
 		Total  int64
@@ -606,8 +614,12 @@ func (s *Store) healthGrid(ctx context.Context, f storage.UsageFilter, now time.
 		bucketMap[t.UTC()] = storage.HealthCell{Bucket: t.UTC(), Total: r.Total, Failed: r.Failed}
 	}
 
-	grid := make([][]storage.HealthCell, 30)
-	for d := 0; d < 30; d++ {
+	days := int(healthFilter.End.Sub(healthFilter.Start).Hours() / 24)
+	if days < 1 {
+		days = 1
+	}
+	grid := make([][]storage.HealthCell, days)
+	for d := 0; d < days; d++ {
 		row := make([]storage.HealthCell, 96)
 		dayStart := healthFilter.Start.Add(time.Duration(d) * 24 * time.Hour)
 		for c := 0; c < 96; c++ {

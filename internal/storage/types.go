@@ -91,7 +91,7 @@ type APIKeyOverview struct {
 
 // UsageFilter parameterizes all aggregation/listing queries.
 type UsageFilter struct {
-	Range     string // all | today | 4h | 8h | 12h | 24h | 7d | custom
+	Range     string // all | today | 4h | 8h | 12h | 24h | 7d | 30d | custom
 	Start     time.Time
 	End       time.Time
 	Models    []string
@@ -226,7 +226,7 @@ type UsageBucket struct {
 	Cost            float64   `json:"cost"`
 }
 
-// HealthCell is one cell of the 30-day health heatmap (15-minute spans by default).
+// HealthCell is one cell of the range-sized health heatmap (15-minute spans by default).
 type HealthCell struct {
 	Bucket  time.Time `json:"bucket"`
 	Total   int64     `json:"total"`

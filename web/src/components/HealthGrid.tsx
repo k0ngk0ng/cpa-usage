@@ -33,11 +33,12 @@ export default function HealthGrid({ grid }: Props) {
     hours: hourlyCells(day),
   }));
   const maxTotal = Math.max(0, ...days.flatMap((day) => day.hours.map((cell) => cell.total)));
+  const title = `${days.length}-day request health by hour`;
 
   return (
     <div className="bg-panel border border-border rounded-lg p-4">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-medium">30-day request health by hour</h3>
+        <h3 className="text-sm font-medium">{title}</h3>
         <Legend />
       </div>
       <div className="overflow-x-auto pb-1">

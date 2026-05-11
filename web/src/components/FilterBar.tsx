@@ -10,6 +10,7 @@ const RANGE_PRESETS: { key: RangeKey; label: string }[] = [
   { key: "12h", label: "12h" },
   { key: "24h", label: "24h" },
   { key: "7d", label: "7d" },
+  { key: "30d", label: "30d" },
   { key: "all", label: "All" },
   { key: "custom", label: "Custom" },
 ];

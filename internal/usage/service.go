@@ -95,6 +95,10 @@ func ParseFilter(rangeKey string, startStr, endStr string, models, sources, apiK
 		end := startOfDay(now).Add(24 * time.Hour)
 		f.End = end
 		f.Start = end.Add(-7 * 24 * time.Hour)
+	case "30d":
+		end := startOfDay(now).Add(24 * time.Hour)
+		f.End = end
+		f.Start = end.Add(-30 * 24 * time.Hour)
 	case "custom":
 		if strings.TrimSpace(startStr) == "" || strings.TrimSpace(endStr) == "" {
 			return f, errors.New("custom range requires start and end")

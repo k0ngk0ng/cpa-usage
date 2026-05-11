@@ -37,7 +37,7 @@ export default function Overview() {
   }, [filter, tick]);
 
   const summary = data?.summary;
-  const useDaily = filter.range === "7d" || filter.range === "all";
+  const useDaily = filter.range === "7d" || filter.range === "30d" || filter.range === "all";
   const series = useDaily ? data?.daily_series || [] : data?.hourly_series || [];
 
   return (
@@ -104,7 +104,7 @@ export default function Overview() {
         </div>
 
         <div>
-          <h2 className="text-sm uppercase tracking-wider text-muted mb-2">30-day health</h2>
+          <h2 className="text-sm uppercase tracking-wider text-muted mb-2">Health</h2>
           {data && <HealthGrid grid={data.health_grid || []} />}
         </div>
       </div>
