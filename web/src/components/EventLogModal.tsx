@@ -199,48 +199,68 @@ function buildTabs(entry: EventLogEntry | null): Tab[] {
           <Label>Request info</Label>
           <KVList map={entry.info} />
         </div>
-        <div>
-          <Label>Headers</Label>
-          <KVList map={entry.headers} />
-        </div>
       </Panel>
     ),
   });
 
   tabs.push({
     id: "request",
-    label: "Request body",
+    label: "Request",
     badge: entry.request_body_truncated
       ? { text: "truncated", tone: "warn" }
       : undefined,
     render: () => (
       <Panel>
-        <BodyView raw={entry.request_body} kind="request" />
+        <div className="mb-3">
+          <Label>Headers</Label>
+          <KVList map={entry.headers} />
+        </div>
+        <div>
+          <Label>
+            Body
+            {entry.request_body_truncated && (
+              <span className="ml-2 text-warn text-[10px] uppercase tracking-wider">
+                truncated
+              </span>
+            )}
+          </Label>
+          <BodyView raw={entry.request_body} kind="request" />
+        </div>
       </Panel>
     ),
   });
 
-  for (const r of entry.api_responses || []) {
+  const responses = entry.api_responses || [];
+  if (responses.length > 0) {
+    const last = responses[responses.length - 1];
     let badge: Tab["badge"];
-    if (r.status) badge = { text: String(r.status), tone: statusTone(r.status) };
-    else if (r.error) badge = { text: "ERR", tone: "danger" };
+    if (last.status) badge = { text: String(last.status), tone: statusTone(last.status) };
+    else if (last.error) badge = { text: "ERR", tone: "danger" };
     tabs.push({
-      id: `api-${r.index}`,
-      label: `Response ${r.index}`,
+      id: "response",
+      label: "Response",
       badge,
-      render: () => <APIResponseTab attempt={r} />,
+      render: () => (
+        <Panel>
+          <APIResponsesView attempts={responses} />
+        </Panel>
+      ),
     });
   }
 
   tabs.push({
     id: "final",
-    label: "Final response",
+    label: "Final",
     badge: entry.response_body_truncated
       ? { text: "truncated", tone: "warn" }
       : undefined,
     render: () => (
       <Panel>
-        <BodyView raw={entry.response_body} kind="response" />
+        <FinalChatView
+          requestRaw={entry.request_body}
+          responseRaw={finalResponseBody(entry)}
+          responseTruncated={entry.response_body_truncated}
+        />
       </Panel>
     ),
   });
@@ -248,14 +268,40 @@ function buildTabs(entry: EventLogEntry | null): Tab[] {
   return tabs;
 }
 
-function APIResponseTab({ attempt }: { attempt: APIResponseAttempt }) {
+function APIResponsesView({ attempts }: { attempts: APIResponseAttempt[] }) {
+  return (
+    <div className="space-y-4">
+      {attempts.map((attempt, index) => (
+        <div key={attempt.index || index}>
+          {attempts.length > 1 && (
+            <div className="mb-2 flex items-center gap-2">
+              <Label>Attempt {attempt.index || index + 1}</Label>
+              {attempt.status ? (
+                <span className={clsx("rounded px-1.5 py-0.5 text-[10px] font-mono", toneClass(statusTone(attempt.status)))}>
+                  {attempt.status}
+                </span>
+              ) : attempt.error ? (
+                <span className={clsx("rounded px-1.5 py-0.5 text-[10px] font-mono", toneClass("danger"))}>
+                  ERR
+                </span>
+              ) : null}
+            </div>
+          )}
+          <APIResponseAttemptView attempt={attempt} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function APIResponseAttemptView({ attempt }: { attempt: APIResponseAttempt }) {
   const meta: Record<string, string> = {};
   if (attempt.timestamp) meta.Timestamp = attempt.timestamp;
   if (attempt.status) meta.Status = String(attempt.status);
   const hasHeaders = Object.keys(attempt.headers || {}).length > 0;
   const hasBody = (attempt.body || "").trim().length > 0;
   return (
-    <Panel>
+    <>
       {Object.keys(meta).length > 0 && (
         <div className="mb-3">
           <Label>Attempt</Label>
@@ -289,7 +335,7 @@ function APIResponseTab({ attempt }: { attempt: APIResponseAttempt }) {
           <BodyView raw={attempt.body} kind="response" />
         </div>
       )}
-    </Panel>
+    </>
   );
 }
 
@@ -354,7 +400,14 @@ function BodyView({ raw, kind }: { raw: string; kind: "request" | "response" }) 
     if (stream.detected) {
       return {
         kind: "chat" as const,
-        turns: [{ role: "assistant", text: streamToMarkdown(stream), encrypted: stream.encrypted }],
+        turns: [
+          {
+            role: "assistant",
+            text: streamToMarkdown(stream),
+            encrypted: stream.encrypted,
+            hiddenType: stream.hiddenType,
+          },
+        ],
         label: "stream",
       };
     }
@@ -362,7 +415,14 @@ function BodyView({ raw, kind }: { raw: string; kind: "request" | "response" }) 
     if (json) {
       return {
         kind: "chat" as const,
-        turns: [{ role: "assistant", text: streamToMarkdown(json), encrypted: json.encrypted }],
+        turns: [
+          {
+            role: "assistant",
+            text: streamToMarkdown(json),
+            encrypted: json.encrypted,
+            hiddenType: json.hiddenType,
+          },
+        ],
         label: "json",
       };
     }
@@ -404,6 +464,120 @@ function BodyView({ raw, kind }: { raw: string; kind: "request" | "response" }) 
       )}
     </div>
   );
+}
+
+function FinalChatView({
+  requestRaw,
+  responseRaw,
+  responseTruncated,
+}: {
+  requestRaw: string;
+  responseRaw: string;
+  responseTruncated?: boolean;
+}) {
+  const turns = useMemo(() => finalChatTurns(requestRaw, responseRaw), [requestRaw, responseRaw]);
+  const [mode, setMode] = useState<"pretty" | "raw">(turns.length ? "pretty" : "raw");
+
+  useEffect(() => {
+    if (!turns.length && mode === "pretty") setMode("raw");
+  }, [turns.length, mode]);
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-1">
+        <ToggleButton
+          active={mode === "pretty"}
+          disabled={!turns.length}
+          onClick={() => setMode("pretty")}
+          title={
+            turns.length
+              ? `Rendered (${turns.length} turn${turns.length > 1 ? "s" : ""})`
+              : "No structured content detected"
+          }
+        >
+          Chat
+        </ToggleButton>
+        <ToggleButton active={mode === "raw"} onClick={() => setMode("raw")}>
+          Raw
+        </ToggleButton>
+      </div>
+      {mode === "pretty" && turns.length ? (
+        <ChatView turns={turns} />
+      ) : (
+        <div className="space-y-3">
+          <div>
+            <Label>Request body</Label>
+            <CodeBlock text={requestRaw} />
+          </div>
+          <div>
+            <Label>
+              Final response body
+              {responseTruncated && (
+                <span className="ml-2 text-warn text-[10px] uppercase tracking-wider">
+                  truncated
+                </span>
+              )}
+            </Label>
+            <CodeBlock text={responseRaw} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function finalChatTurns(requestRaw: string, responseRaw: string): Turn[] {
+  const turns: Turn[] = [];
+  const requestTurns = extractRequestTurns(requestRaw);
+  if (requestTurns?.length) {
+    turns.push(...requestTurns);
+  } else if (requestRaw.trim()) {
+    turns.push({ role: "user", text: fenceMarkdown(requestRaw.trim()) });
+  }
+
+  const responseTurn = responseToTurn(responseRaw);
+  if (responseTurn) turns.push(responseTurn);
+  return turns;
+}
+
+function responseToTurn(raw: string): Turn | null {
+  if (!raw.trim()) return null;
+  const stream = extractResponseStream(raw);
+  if (stream.detected) {
+    return {
+      role: "assistant",
+      text: streamToMarkdown(stream),
+      encrypted: stream.encrypted,
+      hiddenType: stream.hiddenType,
+    };
+  }
+  const json = extractResponseJSON(raw);
+  if (json) {
+    return {
+      role: "assistant",
+      text: streamToMarkdown(json),
+      encrypted: json.encrypted,
+      hiddenType: json.hiddenType,
+    };
+  }
+  return { role: "assistant", text: fenceMarkdown(raw.trim()) };
+}
+
+function finalResponseBody(entry: EventLogEntry): string {
+  if (entry.response_body.trim()) return entry.response_body;
+  const successful = [...(entry.api_responses || [])]
+    .reverse()
+    .find((r) => typeof r.status === "number" && r.status >= 200 && r.status < 300 && r.body);
+  if (successful) return successful.body;
+  for (let i = (entry.api_responses || []).length - 1; i >= 0; i -= 1) {
+    const body = entry.api_responses[i].body;
+    if (body) return body;
+  }
+  return "";
+}
+
+function fenceMarkdown(text: string): string {
+  return `\`\`\`\n${text}\n\`\`\``;
 }
 
 function ToggleButton({
@@ -451,8 +625,9 @@ function ChatView({ turns }: { turns: Turn[] }) {
   return (
     <div className="bg-panel border border-border rounded p-3 chat-view">
       {turns.map((turn, index) => {
-        const isTool = turn.role.toLowerCase() === "tool";
+        const isTool = isToolTurn(turn);
         const collapsed = isTool && !expandedTools.has(index);
+        const bubbleClass = isTool ? "chat-bubble-tool" : chatBubbleClass(turn.role);
         return (
           <div
             key={index}
@@ -461,7 +636,7 @@ function ChatView({ turns }: { turns: Turn[] }) {
               turn.role.toLowerCase() === "user" ? "chat-row-user" : "chat-row-left",
             )}
           >
-            <div className={clsx("chat-bubble", chatBubbleClass(turn.role), collapsed && "chat-bubble-collapsed")}>
+            <div className={clsx("chat-bubble", bubbleClass, collapsed && "chat-bubble-collapsed")}>
               <div className="chat-meta">
                 <span className={clsx("role-badge", roleBadgeClass(turn.role))}>{turn.role}</span>
                 <span className="chat-turn">#{index + 1}</span>
@@ -497,6 +672,18 @@ function ChatView({ turns }: { turns: Turn[] }) {
   );
 }
 
+function isToolTurn(turn: Turn): boolean {
+  if (turn.role.toLowerCase() === "tool") return true;
+  const text = turnText(turn).trimStart();
+  if (startsWithToolBlock(text)) return true;
+  const hiddenThinking = /^\*\*Thinking\*\*\s+_\((?:reasoning|thinking|redacted_thinking)\)_\s+(?:---\s+)?/s.exec(text);
+  return hiddenThinking ? startsWithToolBlock(text.slice(hiddenThinking[0].length).trimStart()) : false;
+}
+
+function startsWithToolBlock(text: string): boolean {
+  return text.startsWith("**[tool_use ") || text.startsWith("**[tool_result");
+}
+
 function chatPreview(turn: Turn): string {
   const text = turnText(turn).replace(/[`*_#>\[\]()]/g, "").replace(/\s+/g, " ").trim();
   if (!text) return "(empty)";
@@ -505,7 +692,7 @@ function chatPreview(turn: Turn): string {
 
 function turnText(turn: Turn): string {
   if (turn.text) return turn.text;
-  return turn.encrypted ? "_(encrypted)_" : "_(empty)_";
+  return turn.hiddenType ? `_(${turn.hiddenType})_` : "_(empty)_";
 }
 
 function chatBubbleClass(role: string): string {

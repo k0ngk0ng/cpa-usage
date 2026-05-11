@@ -18,6 +18,7 @@ export interface Turn {
   text: string;
   attachments?: string[];
   encrypted?: boolean;
+  hiddenType?: string;
 }
 
 export function extractRequestTurns(rawJson: string): Turn[] | null {
@@ -103,10 +104,10 @@ function messageToTurn(raw: unknown): Turn {
           const quoted = t.split("\n").map((l) => "> " + l).join("\n");
           append("_thinking_\n" + quoted);
         } else if (hasEncryptedReasoning(p)) {
-          append(encryptedText());
+          append(hiddenTypeText(type));
         }
       } else if (type === "redacted_thinking") {
-        append(encryptedText());
+        append(hiddenTypeText(type));
       } else if (type === "tool_use") {
         const name = String(p.name || "tool");
         const input = JSON.stringify(p.input ?? {}, null, 2);
@@ -161,7 +162,13 @@ function toolResultContentToMarkdown(raw: unknown, imageLabel: string): string {
 }
 
 function fenceText(text: string): string {
-  return `\`\`\`\n${text}\n\`\`\``;
+  return codeFence(text);
+}
+
+function codeFence(text: string, language = ""): string {
+  const longestTicks = Math.max(2, ...Array.from(text.matchAll(/`+/g), (m) => m[0].length));
+  const ticks = "`".repeat(longestTicks + 1);
+  return `${ticks}${language}\n${text}\n${ticks}`;
 }
 
 function imagePartToMarkdown(part: Record<string, unknown>, alt: string): string | null {
@@ -276,13 +283,18 @@ function hasEncryptedReasoning(o: Record<string, unknown>): boolean {
   );
 }
 
-function encryptedText(): string {
-  return "_(encrypted)_";
+function hiddenTypeText(type: string): string {
+  return `_(${type})_`;
+}
+
+function markHidden(out: { encrypted?: boolean; hiddenType?: string }, type: string) {
+  out.encrypted = true;
+  if (!out.hiddenType) out.hiddenType = type;
 }
 
 // responsesInputToTurn handles the OpenAI Responses `input[]` mixed-item
-// shape. Items with type=message fall back to messageToTurn; function_call
-// and function_call_output items are rendered as their own assistant/tool
+// shape. Items with type=message fall back to messageToTurn; tool call
+// and tool output items are rendered as their own assistant/tool
 // turns so they don't show up as "user (empty)".
 function responsesInputToTurn(raw: unknown): Turn {
   const m = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
@@ -291,18 +303,24 @@ function responsesInputToTurn(raw: unknown): Turn {
     const name = String(m.name || "tool");
     const args = typeof m.arguments === "string" ? m.arguments : JSON.stringify(m.arguments ?? {});
     const json = formatPartialJSON(args);
-    const callID = m.call_id ? ` ${m.call_id}` : "";
     return {
       role: "assistant",
-      text: `**[tool_use ${name}${callID}]**\n\n\`\`\`json\n${json}\n\`\`\``,
+      text: toolUseMarkdown(name, m.call_id, json, "json"),
     };
   }
-  if (type === "function_call_output") {
-    const callID = m.call_id ? ` ${m.call_id}` : "";
+  if (type === "custom_tool_call") {
+    const name = String(m.name || "tool");
+    const input = typeof m.input === "string" ? m.input : JSON.stringify(m.input ?? "", null, 2);
+    return {
+      role: "assistant",
+      text: toolUseMarkdown(name, m.call_id, input, customToolLanguage(name, input)),
+    };
+  }
+  if (type === "function_call_output" || type === "custom_tool_call_output") {
     const out = typeof m.output === "string" ? m.output : JSON.stringify(m.output ?? "", null, 2);
     return {
       role: "tool",
-      text: `**[tool_result${callID}]**\n\n\`\`\`\n${out}\n\`\`\``,
+      text: toolResultMarkdown(m.call_id, out),
     };
   }
   if (type === "reasoning") {
@@ -317,12 +335,29 @@ function responsesInputToTurn(raw: unknown): Turn {
       return { role: "assistant", text: "_thinking_\n" + quoted };
     }
     if (hasEncryptedReasoning(m)) {
-      return { role: "assistant", text: encryptedText(), encrypted: true };
+      return { role: "assistant", text: hiddenTypeText(type), encrypted: true, hiddenType: type };
     }
     return { role: "assistant", text: "", attachments: ["reasoning"] };
   }
   // Default: messages, and anything else with a `role`+`content` shape.
   return messageToTurn(raw);
+}
+
+function toolUseMarkdown(name: string, rawCallID: unknown, input: string, language = ""): string {
+  return `**[tool_use ${name}${callIDSuffix(rawCallID)}]**\n\n${codeFence(input, language)}`;
+}
+
+function toolResultMarkdown(rawCallID: unknown, output: string): string {
+  return `**[tool_result${callIDSuffix(rawCallID)}]**\n\n${codeFence(output)}`;
+}
+
+function callIDSuffix(rawCallID: unknown): string {
+  return rawCallID ? ` ${rawCallID}` : "";
+}
+
+function customToolLanguage(name: string, input: string): string {
+  if (name === "apply_patch" || input.trimStart().startsWith("*** Begin Patch")) return "patch";
+  return "";
 }
 
 function geminiContentToTurn(raw: unknown): Turn {
@@ -363,6 +398,7 @@ export interface StreamExtraction {
   content: string;
   thinking: string;
   encrypted?: boolean;
+  hiddenType?: string;
   errors: string[];
 }
 
@@ -373,6 +409,7 @@ interface AnthropicBlock {
   text: string;
   partialJSON: string;
   encrypted?: boolean;
+  hiddenType?: string;
 }
 
 export function extractResponseStream(text: string): StreamExtraction {
@@ -397,6 +434,7 @@ export function extractResponseStream(text: string): StreamExtraction {
     callID: string;
     args: string;
     order: number;
+    custom?: boolean;
   }
   const openAICalls = new Map<number, OpenAICall>();
   let openAICallOrder = 0;
@@ -422,14 +460,16 @@ export function extractResponseStream(text: string): StreamExtraction {
     if (o.type === "content_block_start") {
       const block = (o.content_block as Record<string, unknown>) || {};
       const idx = typeof o.index === "number" ? (o.index as number) : blockOrder.length;
+      const type = String(block.type || "text");
       if (!blocks.has(idx)) blockOrder.push(idx);
       blocks.set(idx, {
         index: idx,
-        type: String(block.type || "text"),
+        type,
         name: typeof block.name === "string" ? block.name : undefined,
         text: "",
         partialJSON: "",
         encrypted: hasEncryptedReasoning(block),
+        hiddenType: hasEncryptedReasoning(block) ? type : undefined,
       });
     }
     if (o.type === "content_block_delta") {
@@ -444,8 +484,8 @@ export function extractResponseStream(text: string): StreamExtraction {
         if (b) b.text += d.thinking;
         else out.thinking += d.thinking;
       } else if (dt === "signature_delta" && typeof d.signature === "string") {
-        if (b) b.encrypted = true;
-        else out.encrypted = true;
+        if (b) markHidden(b, b.type || "thinking");
+        else markHidden(out, "thinking");
       } else if (dt === "input_json_delta" && typeof d.partial_json === "string") {
         if (b) b.partialJSON += d.partial_json;
       }
@@ -481,6 +521,22 @@ export function extractResponseStream(text: string): StreamExtraction {
           });
         }
       }
+      if (o.type === "response.custom_tool_call_input.delta" && typeof o.delta === "string") {
+        const idx = typeof o.output_index === "number" ? (o.output_index as number) : -1;
+        const call = openAICalls.get(idx);
+        if (call) {
+          call.args += o.delta;
+          call.custom = true;
+        } else {
+          openAICalls.set(idx, {
+            name: "tool",
+            callID: "",
+            args: o.delta,
+            order: openAICallOrder++,
+            custom: true,
+          });
+        }
+      }
     }
     if (o.type === "response.output_item.added") {
       const item = (o.item as Record<string, unknown>) || {};
@@ -494,8 +550,37 @@ export function extractResponseStream(text: string): StreamExtraction {
           args: (existing?.args || "") + partial,
           order: existing?.order ?? openAICallOrder++,
         });
+      } else if (item.type === "custom_tool_call") {
+        const idx = typeof o.output_index === "number" ? (o.output_index as number) : -1;
+        const existing = openAICalls.get(idx);
+        const partial = typeof item.input === "string" ? (item.input as string) : "";
+        openAICalls.set(idx, {
+          name: typeof item.name === "string" ? (item.name as string) : existing?.name || "tool",
+          callID: typeof item.call_id === "string" ? (item.call_id as string) : existing?.callID || "",
+          args: (existing?.args || "") + partial,
+          order: existing?.order ?? openAICallOrder++,
+          custom: true,
+        });
       } else if (item.type === "reasoning" && hasEncryptedReasoning(item)) {
-        out.encrypted = true;
+        markHidden(out, "reasoning");
+      }
+    }
+    if (o.type === "response.output_item.done") {
+      const item = (o.item as Record<string, unknown>) || {};
+      const idx = typeof o.output_index === "number" ? (o.output_index as number) : -1;
+      const existing = openAICalls.get(idx);
+      if (item.type === "function_call" || item.type === "custom_tool_call") {
+        const input =
+          item.type === "custom_tool_call"
+            ? stringValue(item.input)
+            : stringValue(item.arguments);
+        openAICalls.set(idx, {
+          name: stringValue(item.name) || existing?.name || "tool",
+          callID: stringValue(item.call_id) || existing?.callID || "",
+          args: input || existing?.args || "",
+          order: existing?.order ?? openAICallOrder++,
+          custom: item.type === "custom_tool_call" || existing?.custom,
+        });
       }
     }
     if (o.type === "response.function_call_arguments.done") {
@@ -503,6 +588,14 @@ export function extractResponseStream(text: string): StreamExtraction {
       const call = openAICalls.get(idx);
       if (call && typeof o.arguments === "string" && (o.arguments as string).length > call.args.length) {
         call.args = o.arguments as string;
+      }
+    }
+    if (o.type === "response.custom_tool_call_input.done") {
+      const idx = typeof o.output_index === "number" ? (o.output_index as number) : -1;
+      const call = openAICalls.get(idx);
+      if (call && typeof o.input === "string" && (o.input as string).length > call.args.length) {
+        call.args = o.input as string;
+        call.custom = true;
       }
     }
 
@@ -543,24 +636,24 @@ export function extractResponseStream(text: string): StreamExtraction {
       out.content += b.text;
     } else if (b.type === "thinking") {
       if (b.text) out.thinking += b.text;
-      else if (b.encrypted) out.encrypted = true;
+      else if (b.encrypted) markHidden(out, b.hiddenType || b.type);
     } else if (b.type === "redacted_thinking") {
-      out.encrypted = true;
+      markHidden(out, b.hiddenType || b.type);
     } else if (b.type === "tool_use") {
       const json = formatPartialJSON(b.partialJSON);
       const name = b.name || "tool";
       const sep = out.content ? "\n\n" : "";
-      out.content += `${sep}**[tool_use ${name}]**\n\n\`\`\`json\n${json}\n\`\`\``;
+      out.content += sep + toolUseMarkdown(name, undefined, json, "json");
     }
   }
 
-  // Flush OpenAI Responses function_call items in arrival order.
+  // Flush OpenAI Responses tool call items in arrival order.
   const calls = Array.from(openAICalls.values()).sort((a, b) => a.order - b.order);
   for (const c of calls) {
-    const json = formatPartialJSON(c.args);
-    const id = c.callID ? ` ${c.callID}` : "";
+    const input = c.custom ? c.args : formatPartialJSON(c.args);
+    const language = c.custom ? customToolLanguage(c.name, input) : "json";
     const sep = out.content ? "\n\n" : "";
-    out.content += `${sep}**[tool_use ${c.name}${id}]**\n\n\`\`\`json\n${json}\n\`\`\``;
+    out.content += sep + toolUseMarkdown(c.name, c.callID, input, language);
   }
 
   return out;
@@ -601,14 +694,14 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
       if (p.type === "text" && typeof p.text === "string") {
         out.content += p.text;
         out.detected = true;
-      } else if (p.type === "thinking" && typeof p.thinking === "string") {
+      } else if (p.type === "thinking" && typeof p.thinking === "string" && p.thinking) {
         out.thinking += p.thinking;
         out.detected = true;
       } else if (p.type === "thinking" && hasEncryptedReasoning(p)) {
-        out.encrypted = true;
+        markHidden(out, "thinking");
         out.detected = true;
       } else if (p.type === "redacted_thinking") {
-        out.encrypted = true;
+        markHidden(out, "redacted_thinking");
         out.detected = true;
       } else if (p.type === "tool_use") {
         const name = String(p.name || "tool");
@@ -655,7 +748,7 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
         out.thinking += msg.reasoning;
         out.detected = true;
       } else if (hasEncryptedReasoning(msg)) {
-        out.encrypted = true;
+        markHidden(out, "reasoning");
         out.detected = true;
       }
     }
@@ -670,9 +763,23 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
         const name = String(it.name || "tool");
         const args = typeof it.arguments === "string" ? (it.arguments as string) : JSON.stringify(it.arguments ?? {});
         const json = formatPartialJSON(args);
-        const callID = it.call_id ? ` ${it.call_id}` : "";
         const sep = out.content ? "\n\n" : "";
-        out.content += `${sep}**[tool_use ${name}${callID}]**\n\n\`\`\`json\n${json}\n\`\`\``;
+        out.content += sep + toolUseMarkdown(name, it.call_id, json, "json");
+        out.detected = true;
+        continue;
+      }
+      if (it.type === "custom_tool_call") {
+        const name = String(it.name || "tool");
+        const input = typeof it.input === "string" ? it.input : JSON.stringify(it.input ?? "", null, 2);
+        const sep = out.content ? "\n\n" : "";
+        out.content += sep + toolUseMarkdown(name, it.call_id, input, customToolLanguage(name, input));
+        out.detected = true;
+        continue;
+      }
+      if (it.type === "function_call_output" || it.type === "custom_tool_call_output") {
+        const output = typeof it.output === "string" ? it.output : JSON.stringify(it.output ?? "", null, 2);
+        const sep = out.content ? "\n\n" : "";
+        out.content += sep + toolResultMarkdown(it.call_id, output);
         out.detected = true;
         continue;
       }
@@ -696,7 +803,7 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
           out.thinking += (out.thinking ? "\n" : "") + summary;
           out.detected = true;
         } else if (hasEncryptedReasoning(it)) {
-          out.encrypted = true;
+          markHidden(out, "reasoning");
           out.detected = true;
         }
         continue;
@@ -741,7 +848,7 @@ function appendResponseMarkdown(out: StreamExtraction, chunk: string) {
 export function turnsToMarkdown(turns: Turn[]): string {
   return turns
     .map((t) => {
-      let out = `**@role:${t.role}**\n\n${t.text || (t.encrypted ? encryptedText() : "_(empty)_")}`;
+      let out = `**@role:${t.role}**\n\n${t.text || hiddenTypeFallback(t) || "_(empty)_"}`;
       if (t.attachments?.length) {
         out += `\n\n_attachments_: ${t.attachments.join("; ")}`;
       }
@@ -757,8 +864,8 @@ export function streamToMarkdown(s: StreamExtraction): string {
   if (s.thinking.trim()) {
     const quoted = s.thinking.trim().split("\n").map((l) => "> " + l).join("\n");
     parts.push("**Thinking**\n\n" + quoted);
-  } else if (s.encrypted) {
-    parts.push("**Thinking**\n\n" + encryptedText());
+  } else if (s.hiddenType) {
+    parts.push("**Thinking**\n\n" + hiddenTypeText(s.hiddenType));
   }
   if (s.content.trim()) {
     parts.push(s.content);
@@ -767,4 +874,8 @@ export function streamToMarkdown(s: StreamExtraction): string {
     parts.push("**Errors**\n\n" + s.errors.map((e) => "- " + e).join("\n"));
   }
   return parts.join("\n\n---\n\n") || "_(empty)_";
+}
+
+function hiddenTypeFallback(value: { encrypted?: boolean; hiddenType?: string }): string {
+  return value.hiddenType ? hiddenTypeText(value.hiddenType) : "";
 }
