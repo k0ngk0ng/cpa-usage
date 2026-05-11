@@ -104,7 +104,7 @@ export default function Overview() {
         </div>
 
         <div>
-          <h2 className="text-sm uppercase tracking-wider text-muted mb-2">7-day health</h2>
+          <h2 className="text-sm uppercase tracking-wider text-muted mb-2">30-day health</h2>
           {data && <HealthGrid grid={data.health_grid || []} />}
         </div>
       </div>

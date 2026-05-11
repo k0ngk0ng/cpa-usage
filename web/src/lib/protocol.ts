@@ -38,7 +38,6 @@ export function extractRequestTurns(rawJson: string): Turn[] | null {
   appendInstructionTurn(turns, "system", o.systemInstruction);
   appendInstructionTurn(turns, "system", o.system_instruction);
   appendInstructionTurn(turns, "developer", o.developer);
-  appendToolDeclarationTurn(turns, o.tools);
 
   if (Array.isArray(o.messages)) {
     for (const m of o.messages) turns.push(messageToTurn(m));
@@ -55,6 +54,18 @@ export function extractRequestTurns(rawJson: string): Turn[] | null {
   }
 
   return turns.length > 0 ? turns : null;
+}
+
+export function extractRequestToolDeclarations(rawJson: string): Turn | null {
+  let obj: unknown;
+  try {
+    obj = JSON.parse(rawJson);
+  } catch {
+    return null;
+  }
+  if (!obj || typeof obj !== "object") return null;
+  const o = obj as Record<string, unknown>;
+  return toolDeclarationTurn(o.tools);
 }
 
 function appendInstructionTurn(turns: Turn[], role: string, raw: unknown) {
@@ -187,12 +198,12 @@ function messageFallbackMarkdown(message: Record<string, unknown>, type: string)
   return meaningfulKeys.length ? typedItemMarkdown(message, type) : "";
 }
 
-function appendToolDeclarationTurn(turns: Turn[], raw: unknown) {
-  if (!Array.isArray(raw) || raw.length === 0) return;
-  turns.push({
+function toolDeclarationTurn(raw: unknown): Turn | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  return {
     role: "tool",
     text: toolDeclarationsMarkdown(raw),
-  });
+  };
 }
 
 function toolDeclarationsMarkdown(tools: unknown[]): string {

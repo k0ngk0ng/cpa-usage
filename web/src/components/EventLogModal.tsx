@@ -7,6 +7,7 @@ import type { APIResponseAttempt, EventLogEntry, UsageEventRecord } from "../api
 import { formatBytes, formatTimestamp } from "../lib/utils";
 import {
   extractRequestTurns,
+  extractRequestToolDeclarations,
   extractResponseJSON,
   extractResponseStream,
   isSafeDataImageURL,
@@ -392,8 +393,13 @@ function BodyView({ raw, kind }: { raw: string; kind: "request" | "response" }) 
   const projection = useMemo(() => {
     if (kind === "request") {
       const turns = extractRequestTurns(raw);
-      return turns
-        ? { kind: "chat" as const, turns, label: `${turns.length} turn${turns.length > 1 ? "s" : ""}` }
+      const toolDeclarations = extractRequestToolDeclarations(raw);
+      const turnCount = turns?.length ?? 0;
+      const label = `${turnCount} turn${turnCount === 1 ? "" : "s"}${
+        toolDeclarations ? " + tools" : ""
+      }`;
+      return turns || toolDeclarations
+        ? { kind: "chat" as const, turns: turns ?? [], toolDeclarations, label }
         : null;
     }
     const stream = extractResponseStream(raw);
@@ -407,9 +413,10 @@ function BodyView({ raw, kind }: { raw: string; kind: "request" | "response" }) 
             encrypted: stream.encrypted,
             hiddenType: stream.hiddenType,
           },
-        ],
-        label: "stream",
-      };
+	        ],
+	        label: "stream",
+	        toolDeclarations: null,
+	      };
     }
     const json = extractResponseJSON(raw);
     if (json) {
@@ -422,9 +429,10 @@ function BodyView({ raw, kind }: { raw: string; kind: "request" | "response" }) 
             encrypted: json.encrypted,
             hiddenType: json.hiddenType,
           },
-        ],
-        label: "json",
-      };
+	        ],
+	        label: "json",
+	        toolDeclarations: null,
+	      };
     }
     return null;
   }, [raw, kind]);
@@ -458,10 +466,30 @@ function BodyView({ raw, kind }: { raw: string; kind: "request" | "response" }) 
         )}
       </div>
       {mode === "pretty" && projection ? (
-        <ChatView turns={projection.turns} />
+        <StructuredChatView turns={projection.turns} toolDeclarations={projection.toolDeclarations} />
       ) : (
         <CodeBlock text={raw} />
       )}
+    </div>
+  );
+}
+
+function StructuredChatView({
+  turns,
+  toolDeclarations,
+}: {
+  turns: Turn[];
+  toolDeclarations?: Turn | null;
+}) {
+  return (
+    <div className="space-y-3">
+      {turns.length ? <ChatView turns={turns} /> : null}
+      {toolDeclarations ? (
+        <div>
+          <Label>Available tools</Label>
+          <ChatView turns={[toolDeclarations]} />
+        </div>
+      ) : null}
     </div>
   );
 }

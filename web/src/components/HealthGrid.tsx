@@ -29,6 +29,7 @@ export default function HealthGrid({ grid }: Props) {
   }
   const days = grid.map((day) => ({
     label: dayLabel(day),
+    title: dayTitle(day),
     hours: hourlyCells(day),
   }));
   const maxTotal = Math.max(0, ...days.flatMap((day) => day.hours.map((cell) => cell.total)));
@@ -36,32 +37,36 @@ export default function HealthGrid({ grid }: Props) {
   return (
     <div className="bg-panel border border-border rounded-lg p-4">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-medium">7-day request health by hour</h3>
+        <h3 className="text-sm font-medium">30-day request health by hour</h3>
         <Legend />
       </div>
       <div className="overflow-x-auto pb-1">
         <div
-          className="inline-grid items-center gap-[3px]"
-          style={{ gridTemplateColumns: `3rem repeat(${days.length}, 2.75rem)` }}
+          className="inline-grid items-center gap-[2px]"
+          style={{ gridTemplateColumns: `2.75rem repeat(${days.length}, 0.75rem)` }}
         >
           <div />
           {days.map((day, di) => (
-            <div key={di} className="whitespace-pre-line text-center text-[10px] leading-tight text-muted tabular-nums">
-              {day.label}
+            <div key={di} className="h-8 text-center text-[9px] leading-tight text-muted tabular-nums">
+              {dayLabelVisible(di, days.length) ? (
+                <span className="-rotate-45 origin-bottom-left inline-block whitespace-nowrap">
+                  {day.label}
+                </span>
+              ) : null}
             </div>
           ))}
           {Array.from({ length: 24 }, (_, hour) => (
             <Fragment key={hour}>
-              <div className="h-4 pr-2 text-right text-[10px] leading-4 text-muted tabular-nums">
+              <div className="h-3 pr-2 text-right text-[9px] leading-3 text-muted tabular-nums">
                 {hourTickLabel(hour)}
               </div>
               {days.map((day, di) => {
                 const cell = day.hours[hour];
                 return (
-                  <div key={`${di}-${hour}`} className="flex h-4 items-center justify-center">
+                  <div key={`${di}-${hour}`} className="flex h-3 items-center justify-center">
                     <div
-                      className={clsx("h-4 w-4 rounded-[3px]", cellTone(cell, maxTotal))}
-                      title={`${day.label} ${hourLabel(hour)} — ${cell.total} requests, ${cell.failed} failed${
+                      className={clsx("h-3 w-3 rounded-[2px]", cellTone(cell, maxTotal))}
+                      title={`${day.title} ${hourLabel(hour)} — ${cell.total} requests, ${cell.failed} failed${
                         cell.bucket ? ` (${formatTimestamp(cell.bucket)})` : ""
                       }`}
                     />
@@ -91,7 +96,14 @@ function dayLabel(day: HealthCell[]): string {
   if (day.length === 0) return "";
   const d = new Date(day[0].bucket);
   if (Number.isNaN(d.getTime())) return "";
-  return `${weekdayLabel(d)}\n${d.getMonth() + 1}/${d.getDate()}`;
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+function dayTitle(day: HealthCell[]): string {
+  if (day.length === 0) return "";
+  const d = new Date(day[0].bucket);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${weekdayLabel(d)} ${d.getMonth() + 1}/${d.getDate()}`;
 }
 
 function weekdayLabel(d: Date): string {
@@ -103,7 +115,11 @@ function hourLabel(hour: number): string {
 }
 
 function hourTickLabel(hour: number): string {
-  return hour % 3 === 0 ? `${String(hour).padStart(2, "0")}:00` : "";
+  return hour % 4 === 0 ? `${String(hour).padStart(2, "0")}:00` : "";
+}
+
+function dayLabelVisible(index: number, total: number): boolean {
+  return index === 0 || index === total - 1 || index % 5 === 0;
 }
 
 function Legend() {

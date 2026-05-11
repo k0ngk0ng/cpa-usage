@@ -92,7 +92,7 @@ All endpoints are mounted under `<APP_BASE_PATH>/api/v1`. Protected endpoints re
 | POST | `/auth/logout` | clear cookie |
 | GET | `/status` | drain status (last pop, errors, totals) |
 | POST | `/sync` | trigger metadata refresh |
-| GET | `/usage/overview` | summary + hourly + daily + 7×96 health grid |
+| GET | `/usage/overview` | summary + hourly + daily + 30×96 health grid |
 | GET | `/usage/analysis` | aggregations by API / model / both |
 | GET | `/usage/events` | paginated raw events |
 | GET | `/usage/events/filters` | distinct models + sources |

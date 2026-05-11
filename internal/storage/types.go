@@ -226,7 +226,7 @@ type UsageBucket struct {
 	Cost            float64   `json:"cost"`
 }
 
-// HealthCell is one cell of the 7-day health heatmap (15-minute spans by default).
+// HealthCell is one cell of the 30-day health heatmap (15-minute spans by default).
 type HealthCell struct {
 	Bucket  time.Time `json:"bucket"`
 	Total   int64     `json:"total"`
