@@ -1,11 +1,13 @@
 import { Fragment } from "react";
+import { Link } from "react-router-dom";
 import clsx from "clsx";
-import type { HealthCell } from "../api/types";
+import type { Filter, HealthCell } from "../api/types";
 import { formatTimestamp } from "../lib/utils";
 
 interface Props {
   // Outer = days (chronological), inner = 96 cells per day (15-minute spans).
   grid: HealthCell[][];
+  filter?: Filter;
 }
 
 function cellTone(cell: HealthCell, maxTotal: number): string {
@@ -19,7 +21,7 @@ function cellTone(cell: HealthCell, maxTotal: number): string {
   return "bg-success/40";
 }
 
-export default function HealthGrid({ grid }: Props) {
+export default function HealthGrid({ grid, filter }: Props) {
   if (!grid || grid.length === 0) {
     return (
       <div className="bg-panel border border-border rounded-lg p-6 text-muted text-sm text-center">
@@ -63,14 +65,27 @@ export default function HealthGrid({ grid }: Props) {
               </div>
               {days.map((day, di) => {
                 const cell = day.hours[hour];
+                const title = `${day.title} ${hourLabel(hour)} — ${cell.total} requests, ${cell.failed} failed${
+                  cell.bucket ? ` (${formatTimestamp(cell.bucket)})` : ""
+                }`;
                 return (
                   <div key={`${di}-${hour}`} className="flex h-3 items-center justify-center">
-                    <div
-                      className={clsx("h-3 w-3 rounded-[2px]", cellTone(cell, maxTotal))}
-                      title={`${day.title} ${hourLabel(hour)} — ${cell.total} requests, ${cell.failed} failed${
-                        cell.bucket ? ` (${formatTimestamp(cell.bucket)})` : ""
-                      }`}
-                    />
+                    {cell.total > 0 && cell.bucket ? (
+                      <Link
+                        to={{ pathname: "/events", search: eventSearch(cell, filter) }}
+                        className={clsx(
+                          "block h-3 w-3 rounded-[2px] transition-shadow hover:ring-1 hover:ring-accent focus:outline-none focus:ring-1 focus:ring-accent",
+                          cellTone(cell, maxTotal),
+                        )}
+                        title={title}
+                        aria-label={`Open events for ${title}`}
+                      />
+                    ) : (
+                      <div
+                        className={clsx("h-3 w-3 rounded-[2px]", cellTone(cell, maxTotal))}
+                        title={title}
+                      />
+                    )}
                   </div>
                 );
               })}
@@ -80,6 +95,32 @@ export default function HealthGrid({ grid }: Props) {
       </div>
     </div>
   );
+}
+
+function eventSearch(cell: HealthCell, filter?: Filter): string {
+  const start = new Date(cell.bucket);
+  if (Number.isNaN(start.getTime())) return "";
+  const end = new Date(start.getTime() + 60 * 60 * 1000);
+  const sp = new URLSearchParams();
+  sp.set("range", "custom");
+  sp.set("start", formatDateTimeParam(start));
+  sp.set("end", formatDateTimeParam(end));
+  for (const model of filter?.models ?? []) sp.append("model", model);
+  for (const source of filter?.sources ?? []) sp.append("source", source);
+  for (const key of filter?.apiKey ?? []) sp.append("api_key", key);
+  if (filter?.authIndex) sp.set("auth_index", filter.authIndex);
+  if (filter?.result) sp.set("result", filter.result);
+  return `?${sp.toString()}`;
+}
+
+function formatDateTimeParam(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const hour = String(d.getHours()).padStart(2, "0");
+  const minute = String(d.getMinutes()).padStart(2, "0");
+  const second = String(d.getSeconds()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hour}:${minute}:${second}`;
 }
 
 function hourlyCells(day: HealthCell[]): HealthCell[] {

@@ -105,7 +105,7 @@ export default function Overview() {
 
         <div>
           <h2 className="text-sm uppercase tracking-wider text-muted mb-2">Health</h2>
-          {data && <HealthGrid grid={data.health_grid || []} />}
+          {data && <HealthGrid grid={data.health_grid || []} filter={filter} />}
         </div>
       </div>
     </div>

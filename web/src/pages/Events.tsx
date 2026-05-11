@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import FilterBar from "../components/FilterBar";
 import Table, { Column } from "../components/Table";
 import EventLogModal from "../components/EventLogModal";
@@ -6,12 +7,16 @@ import { api } from "../api/client";
 import { todayFilter, useFilter } from "../hooks/useFilter";
 import { useRefreshTick } from "../lib/refresh";
 import { formatCost, formatLatency, formatNumber, formatTimestamp } from "../lib/utils";
-import type { UsageEventRecord, UsageEventsPage } from "../api/types";
+import type { Filter, RangeKey, ResultFilter, UsageEventRecord, UsageEventsPage } from "../api/types";
 
 const PAGE_SIZES = [20, 50, 100, 500, 1000];
+const RANGE_KEYS: RangeKey[] = ["all", "today", "4h", "8h", "12h", "24h", "7d", "30d", "custom"];
+const RESULT_KEYS: ResultFilter[] = ["", "success", "failed"];
 
 export default function EventsPage() {
-  const { filter, setFilter } = useFilter(todayFilter);
+  const [searchParams] = useSearchParams();
+  const initialFilter = useMemo(() => filterFromSearch(searchParams), [searchParams]);
+  const { filter, setFilter } = useFilter(initialFilter);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(100);
   const [data, setData] = useState<UsageEventsPage | null>(null);
@@ -156,6 +161,24 @@ export default function EventsPage() {
       )}
     </div>
   );
+}
+
+function filterFromSearch(sp: URLSearchParams): Filter {
+  const rangeParam = sp.get("range");
+  const range = RANGE_KEYS.includes(rangeParam as RangeKey) ? (rangeParam as RangeKey) : todayFilter.range;
+  const resultParam = sp.get("result") ?? "";
+  const result = RESULT_KEYS.includes(resultParam as ResultFilter) ? (resultParam as ResultFilter) : "";
+  return {
+    ...todayFilter,
+    range,
+    start: range === "custom" ? sp.get("start") || undefined : undefined,
+    end: range === "custom" ? sp.get("end") || undefined : undefined,
+    models: sp.getAll("model"),
+    sources: sp.getAll("source"),
+    apiKey: sp.getAll("api_key"),
+    authIndex: sp.get("auth_index") || "",
+    result,
+  };
 }
 
 interface PageProps {
