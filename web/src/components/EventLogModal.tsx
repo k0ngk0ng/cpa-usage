@@ -11,8 +11,8 @@ import {
   extractResponseStream,
   isSafeDataImageURL,
   streamToMarkdown,
-  turnsToMarkdown,
 } from "../lib/protocol";
+import type { Turn } from "../lib/protocol";
 
 interface Props {
   event: UsageEventRecord;
@@ -346,14 +346,26 @@ function BodyView({ raw, kind }: { raw: string; kind: "request" | "response" }) 
   const projection = useMemo(() => {
     if (kind === "request") {
       const turns = extractRequestTurns(raw);
-      return turns ? { md: turnsToMarkdown(turns), label: `${turns.length} turn${turns.length > 1 ? "s" : ""}` } : null;
+      return turns
+        ? { kind: "chat" as const, turns, label: `${turns.length} turn${turns.length > 1 ? "s" : ""}` }
+        : null;
     }
     const stream = extractResponseStream(raw);
     if (stream.detected) {
-      return { md: streamToMarkdown(stream), label: "stream" };
+      return {
+        kind: "chat" as const,
+        turns: [{ role: "assistant", text: streamToMarkdown(stream), encrypted: stream.encrypted }],
+        label: "stream",
+      };
     }
     const json = extractResponseJSON(raw);
-    if (json) return { md: streamToMarkdown(json), label: "json" };
+    if (json) {
+      return {
+        kind: "chat" as const,
+        turns: [{ role: "assistant", text: streamToMarkdown(json), encrypted: json.encrypted }],
+        label: "json",
+      };
+    }
     return null;
   }, [raw, kind]);
 
@@ -374,7 +386,7 @@ function BodyView({ raw, kind }: { raw: string; kind: "request" | "response" }) 
           onClick={() => setMode("pretty")}
           title={projection ? `Rendered (${projection.label})` : "No structured content detected"}
         >
-          Markdown
+          Chat
         </ToggleButton>
         <ToggleButton active={mode === "raw"} onClick={() => setMode("raw")}>
           Raw
@@ -386,7 +398,7 @@ function BodyView({ raw, kind }: { raw: string; kind: "request" | "response" }) 
         )}
       </div>
       {mode === "pretty" && projection ? (
-        <MarkdownView markdown={projection.md} />
+        <ChatView turns={projection.turns} />
       ) : (
         <CodeBlock text={raw} />
       )}
@@ -425,14 +437,122 @@ function ToggleButton({
   );
 }
 
-function MarkdownView({ markdown }: { markdown: string }) {
+function ChatView({ turns }: { turns: Turn[] }) {
+  const [expandedTools, setExpandedTools] = useState<Set<number>>(() => new Set());
+  const toggleTool = (index: number) => {
+    setExpandedTools((current) => {
+      const next = new Set(current);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  };
+
   return (
-    <div className="bg-panel border border-border rounded p-3 prose-md">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={markdownUrlTransform}>
-        {markdown}
-      </ReactMarkdown>
+    <div className="bg-panel border border-border rounded p-3 chat-view">
+      {turns.map((turn, index) => {
+        const isTool = turn.role.toLowerCase() === "tool";
+        const collapsed = isTool && !expandedTools.has(index);
+        return (
+          <div
+            key={index}
+            className={clsx(
+              "chat-row",
+              turn.role.toLowerCase() === "user" ? "chat-row-user" : "chat-row-left",
+            )}
+          >
+            <div className={clsx("chat-bubble", chatBubbleClass(turn.role), collapsed && "chat-bubble-collapsed")}>
+              <div className="chat-meta">
+                <span className={clsx("role-badge", roleBadgeClass(turn.role))}>{turn.role}</span>
+                <span className="chat-turn">#{index + 1}</span>
+                {isTool && (
+                  <button className="chat-toggle" onClick={() => toggleTool(index)}>
+                    {collapsed ? "Expand" : "Collapse"}
+                  </button>
+                )}
+              </div>
+              {collapsed ? (
+                <div className="chat-preview">{chatPreview(turn)}</div>
+              ) : (
+                <>
+                  <div className="chat-body prose-md">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      urlTransform={markdownUrlTransform}
+                      components={{ strong: MarkdownStrong }}
+                    >
+                      {turnText(turn)}
+                    </ReactMarkdown>
+                  </div>
+                  {turn.attachments?.length ? (
+                    <div className="chat-attachments">attachments: {turn.attachments.join("; ")}</div>
+                  ) : null}
+                </>
+              )}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
+}
+
+function chatPreview(turn: Turn): string {
+  const text = turnText(turn).replace(/[`*_#>\[\]()]/g, "").replace(/\s+/g, " ").trim();
+  if (!text) return "(empty)";
+  return text.length > 160 ? text.slice(0, 160) + "..." : text;
+}
+
+function turnText(turn: Turn): string {
+  if (turn.text) return turn.text;
+  return turn.encrypted ? "_(encrypted)_" : "_(empty)_";
+}
+
+function chatBubbleClass(role: string): string {
+  switch (role.toLowerCase()) {
+    case "user":
+      return "chat-bubble-user";
+    case "assistant":
+      return "chat-bubble-assistant";
+    case "system":
+    case "developer":
+      return "chat-bubble-system";
+    case "tool":
+      return "chat-bubble-tool";
+    default:
+      return "chat-bubble-muted";
+  }
+}
+
+function MarkdownStrong({ children }: { children?: React.ReactNode }) {
+  const text = reactText(children);
+  if (text.startsWith("@role:")) {
+    const role = text.slice("@role:".length).trim() || "unknown";
+    return <span className={clsx("role-badge", roleBadgeClass(role))}>{role}</span>;
+  }
+  return <strong>{children}</strong>;
+}
+
+function reactText(node: React.ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(reactText).join("");
+  return "";
+}
+
+function roleBadgeClass(role: string): string {
+  switch (role.toLowerCase()) {
+    case "user":
+      return "role-badge-user";
+    case "assistant":
+      return "role-badge-assistant";
+    case "system":
+    case "developer":
+      return "role-badge-system";
+    case "tool":
+      return "role-badge-tool";
+    default:
+      return "role-badge-muted";
+  }
 }
 
 function markdownUrlTransform(url: string, key: string): string {

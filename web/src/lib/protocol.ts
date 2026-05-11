@@ -17,6 +17,7 @@ export interface Turn {
   role: string;
   text: string;
   attachments?: string[];
+  encrypted?: boolean;
 }
 
 export function extractRequestTurns(rawJson: string): Turn[] | null {
@@ -101,7 +102,11 @@ function messageToTurn(raw: unknown): Turn {
         if (t) {
           const quoted = t.split("\n").map((l) => "> " + l).join("\n");
           append("_thinking_\n" + quoted);
+        } else if (hasEncryptedReasoning(p)) {
+          append(encryptedText());
         }
+      } else if (type === "redacted_thinking") {
+        append(encryptedText());
       } else if (type === "tool_use") {
         const name = String(p.name || "tool");
         const input = JSON.stringify(p.input ?? {}, null, 2);
@@ -263,6 +268,18 @@ function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+function hasEncryptedReasoning(o: Record<string, unknown>): boolean {
+  return (
+    typeof o.encrypted_content === "string" ||
+    typeof o.signature === "string" ||
+    typeof o.data === "string"
+  );
+}
+
+function encryptedText(): string {
+  return "_(encrypted)_";
+}
+
 // responsesInputToTurn handles the OpenAI Responses `input[]` mixed-item
 // shape. Items with type=message fall back to messageToTurn; function_call
 // and function_call_output items are rendered as their own assistant/tool
@@ -298,6 +315,9 @@ function responsesInputToTurn(raw: unknown): Turn {
     if (summary) {
       const quoted = summary.split("\n").map((l) => "> " + l).join("\n");
       return { role: "assistant", text: "_thinking_\n" + quoted };
+    }
+    if (hasEncryptedReasoning(m)) {
+      return { role: "assistant", text: encryptedText(), encrypted: true };
     }
     return { role: "assistant", text: "", attachments: ["reasoning"] };
   }
@@ -342,6 +362,7 @@ export interface StreamExtraction {
   detected: boolean;
   content: string;
   thinking: string;
+  encrypted?: boolean;
   errors: string[];
 }
 
@@ -351,6 +372,7 @@ interface AnthropicBlock {
   name?: string;
   text: string;
   partialJSON: string;
+  encrypted?: boolean;
 }
 
 export function extractResponseStream(text: string): StreamExtraction {
@@ -407,6 +429,7 @@ export function extractResponseStream(text: string): StreamExtraction {
         name: typeof block.name === "string" ? block.name : undefined,
         text: "",
         partialJSON: "",
+        encrypted: hasEncryptedReasoning(block),
       });
     }
     if (o.type === "content_block_delta") {
@@ -420,6 +443,9 @@ export function extractResponseStream(text: string): StreamExtraction {
       } else if (dt === "thinking_delta" && typeof d.thinking === "string") {
         if (b) b.text += d.thinking;
         else out.thinking += d.thinking;
+      } else if (dt === "signature_delta" && typeof d.signature === "string") {
+        if (b) b.encrypted = true;
+        else out.encrypted = true;
       } else if (dt === "input_json_delta" && typeof d.partial_json === "string") {
         if (b) b.partialJSON += d.partial_json;
       }
@@ -468,6 +494,8 @@ export function extractResponseStream(text: string): StreamExtraction {
           args: (existing?.args || "") + partial,
           order: existing?.order ?? openAICallOrder++,
         });
+      } else if (item.type === "reasoning" && hasEncryptedReasoning(item)) {
+        out.encrypted = true;
       }
     }
     if (o.type === "response.function_call_arguments.done") {
@@ -514,7 +542,10 @@ export function extractResponseStream(text: string): StreamExtraction {
     if (b.type === "text") {
       out.content += b.text;
     } else if (b.type === "thinking") {
-      out.thinking += b.text;
+      if (b.text) out.thinking += b.text;
+      else if (b.encrypted) out.encrypted = true;
+    } else if (b.type === "redacted_thinking") {
+      out.encrypted = true;
     } else if (b.type === "tool_use") {
       const json = formatPartialJSON(b.partialJSON);
       const name = b.name || "tool";
@@ -573,6 +604,12 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
       } else if (p.type === "thinking" && typeof p.thinking === "string") {
         out.thinking += p.thinking;
         out.detected = true;
+      } else if (p.type === "thinking" && hasEncryptedReasoning(p)) {
+        out.encrypted = true;
+        out.detected = true;
+      } else if (p.type === "redacted_thinking") {
+        out.encrypted = true;
+        out.detected = true;
       } else if (p.type === "tool_use") {
         const name = String(p.name || "tool");
         const input = JSON.stringify(p.input ?? {}, null, 2);
@@ -617,6 +654,9 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
       if (typeof msg.reasoning === "string" && msg.reasoning) {
         out.thinking += msg.reasoning;
         out.detected = true;
+      } else if (hasEncryptedReasoning(msg)) {
+        out.encrypted = true;
+        out.detected = true;
       }
     }
   }
@@ -641,6 +681,22 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
         const url = dataToImageURL(mimeType, it.result);
         if (url) {
           appendResponseMarkdown(out, `![generated image](${url})`);
+          out.detected = true;
+        }
+        continue;
+      }
+      if (it.type === "reasoning") {
+        const summary = Array.isArray(it.summary)
+          ? it.summary
+              .map((s) => (s && typeof s === "object" ? String((s as { text?: string }).text ?? "") : ""))
+              .filter(Boolean)
+              .join("\n")
+          : "";
+        if (summary) {
+          out.thinking += (out.thinking ? "\n" : "") + summary;
+          out.detected = true;
+        } else if (hasEncryptedReasoning(it)) {
+          out.encrypted = true;
           out.detected = true;
         }
         continue;
@@ -681,11 +737,11 @@ function appendResponseMarkdown(out: StreamExtraction, chunk: string) {
 }
 
 // turnsToMarkdown renders a list of conversation turns as a single markdown
-// document with each role as a heading.
+// document with each role as a badge.
 export function turnsToMarkdown(turns: Turn[]): string {
   return turns
     .map((t) => {
-      let out = `## ${t.role}\n\n${t.text || "_(empty)_"}`;
+      let out = `**@role:${t.role}**\n\n${t.text || (t.encrypted ? encryptedText() : "_(empty)_")}`;
       if (t.attachments?.length) {
         out += `\n\n_attachments_: ${t.attachments.join("; ")}`;
       }
@@ -701,6 +757,8 @@ export function streamToMarkdown(s: StreamExtraction): string {
   if (s.thinking.trim()) {
     const quoted = s.thinking.trim().split("\n").map((l) => "> " + l).join("\n");
     parts.push("**Thinking**\n\n" + quoted);
+  } else if (s.encrypted) {
+    parts.push("**Thinking**\n\n" + encryptedText());
   }
   if (s.content.trim()) {
     parts.push(s.content);

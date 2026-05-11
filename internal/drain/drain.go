@@ -33,17 +33,18 @@ type Config struct {
 
 // Status is a snapshot of recent drain activity, exposed via /status.
 type Status struct {
-	LastPopAt           time.Time
-	LastInsertedAt      time.Time
-	LastErrorAt         time.Time
-	LastError           string
-	LastMetadataSyncAt  time.Time
-	LastMetadataError   string
-	TotalInserted       int64
-	TotalDeduped        int64
-	TotalDecodeErrors   int64
-	BatchesPopped       int64
-	RedisAddress        string
+	LastPopAt          time.Time
+	LastInsertedAt     time.Time
+	LastErrorAt        time.Time
+	LastError          string
+	lastErrorSource    string
+	LastMetadataSyncAt time.Time
+	LastMetadataError  string
+	TotalInserted      int64
+	TotalDeduped       int64
+	TotalDecodeErrors  int64
+	BatchesPopped      int64
+	RedisAddress       string
 }
 
 // Drain orchestrates the queue-pop / decode / insert / metadata-sync pipeline.
@@ -152,7 +153,7 @@ func (d *Drain) Run(ctx context.Context) error {
 
 		messages, err := d.queue.PopUsage(ctx)
 		if err != nil {
-			d.recordError(err)
+			d.recordError("pop", err)
 			d.logger.WithError(err).Warn("redis pop failed")
 			if sleepCtx(ctx, d.cfg.ErrorBackoff) {
 				return nil
@@ -161,10 +162,7 @@ func (d *Drain) Run(ctx context.Context) error {
 		}
 
 		now := time.Now().UTC()
-		d.mu.Lock()
-		d.status.LastPopAt = now
-		d.status.BatchesPopped++
-		d.mu.Unlock()
+		d.recordPopSuccess(now)
 
 		if len(messages) == 0 {
 			if sleepCtx(ctx, d.cfg.IdleInterval) {
@@ -185,18 +183,14 @@ func (d *Drain) Run(ctx context.Context) error {
 		}
 		inserted, deduped, err := d.store.InsertUsageEvents(ctx, events)
 		if err != nil {
-			d.recordError(err)
+			d.recordError("insert", err)
 			d.logger.WithError(err).Error("insert usage events failed")
 			if sleepCtx(ctx, d.cfg.ErrorBackoff) {
 				return nil
 			}
 			continue
 		}
-		d.mu.Lock()
-		d.status.LastInsertedAt = time.Now().UTC()
-		d.status.TotalInserted += int64(inserted)
-		d.status.TotalDeduped += int64(deduped)
-		d.mu.Unlock()
+		d.recordInsertSuccess(time.Now().UTC(), inserted, deduped)
 	}
 }
 
@@ -216,10 +210,34 @@ func (d *Drain) runMetadataSync(ctx context.Context) error {
 	return err
 }
 
-func (d *Drain) recordError(err error) {
+func (d *Drain) recordError(source string, err error) {
 	d.mu.Lock()
 	d.status.LastErrorAt = time.Now().UTC()
 	d.status.LastError = err.Error()
+	d.status.lastErrorSource = source
+	d.mu.Unlock()
+}
+
+func (d *Drain) recordPopSuccess(at time.Time) {
+	d.mu.Lock()
+	d.status.LastPopAt = at
+	d.status.BatchesPopped++
+	if d.status.lastErrorSource == "pop" {
+		d.status.LastError = ""
+		d.status.lastErrorSource = ""
+	}
+	d.mu.Unlock()
+}
+
+func (d *Drain) recordInsertSuccess(at time.Time, inserted, deduped int) {
+	d.mu.Lock()
+	d.status.LastInsertedAt = at
+	d.status.TotalInserted += int64(inserted)
+	d.status.TotalDeduped += int64(deduped)
+	if d.status.lastErrorSource == "insert" {
+		d.status.LastError = ""
+		d.status.lastErrorSource = ""
+	}
 	d.mu.Unlock()
 }
 

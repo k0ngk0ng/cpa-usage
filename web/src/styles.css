@@ -53,7 +53,68 @@ body {
   object-fit: contain; margin: 0.75em 0; border: 1px solid #262b36;
   border-radius: 4px; background: #0b0d11;
 }
+.prose-md .role-badge {
+  display: inline-flex; align-items: center; height: 22px; margin: 0 0 0.35em;
+  padding: 0 0.55em; border-radius: 4px; border: 1px solid;
+  font-family: "JetBrains Mono", Menlo, Consolas, monospace; font-size: 11px;
+  font-weight: 700; line-height: 1; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.prose-md .role-badge-user { color: #9ec5ff; background: #13294b; border-color: #315f9f; }
+.prose-md .role-badge-assistant { color: #9ee6c7; background: #12362d; border-color: #2a7a62; }
+.prose-md .role-badge-system { color: #e6c98f; background: #3a2b10; border-color: #7e6124; }
+.prose-md .role-badge-tool { color: #d0b4ff; background: #2d1f49; border-color: #674aa1; }
+.prose-md .role-badge-muted { color: #c9d0dc; background: #202632; border-color: #3b4454; }
 .prose-md a { color: #6aa6ff; text-decoration: underline; }
 .prose-md table { border-collapse: collapse; margin: 0.5em 0; }
 .prose-md th, .prose-md td { border: 1px solid #262b36; padding: 0.25em 0.6em; }
 .prose-md strong { font-weight: 600; }
+
+.chat-view {
+  display: flex; flex-direction: column; gap: 0.8rem;
+}
+.chat-row {
+  display: flex; width: 100%;
+}
+.chat-row-left { justify-content: flex-start; }
+.chat-row-user { justify-content: flex-end; }
+.chat-bubble {
+  max-width: min(78%, 820px); border: 1px solid #262b36; border-radius: 8px;
+  padding: 0.65rem 0.8rem; background: #121722;
+}
+.chat-bubble-user { background: #10213a; border-color: #2a568f; }
+.chat-bubble-assistant { background: #102820; border-color: #25624f; }
+.chat-bubble-system { background: #2b210f; border-color: #6d5420; }
+.chat-bubble-tool { background: #211837; border-color: #543d87; }
+.chat-bubble-muted { background: #171c26; border-color: #343c4d; }
+.chat-bubble-collapsed {
+  max-width: min(68%, 680px);
+}
+.chat-meta {
+  display: flex; align-items: center; gap: 0.45rem; margin-bottom: 0.35rem;
+}
+.chat-meta .role-badge {
+  margin: 0;
+}
+.chat-turn {
+  color: #8a93a3; font-family: "JetBrains Mono", Menlo, Consolas, monospace; font-size: 10px;
+}
+.chat-toggle {
+  margin-left: auto; color: #c9d0dc; border: 1px solid #3b4454; border-radius: 4px;
+  padding: 0.1rem 0.4rem; font-size: 10px; line-height: 1.2;
+}
+.chat-toggle:hover {
+  color: #e7eaf0; background: #2a3140;
+}
+.chat-preview {
+  color: #c9d0dc; font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-body.prose-md {
+  font-size: 12px;
+}
+.chat-body.prose-md > :first-child { margin-top: 0; }
+.chat-body.prose-md > :last-child { margin-bottom: 0; }
+.chat-attachments {
+  margin-top: 0.45rem; color: #8a93a3;
+  font-family: "JetBrains Mono", Menlo, Consolas, monospace; font-size: 10px;
+}
