@@ -439,7 +439,7 @@ function BodyView({ raw, kind }: { raw: string; kind: "request" | "response" }) 
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-1">
+      <div className="sticky top-0 z-10 -mx-1 flex items-center gap-1 bg-panel2/95 px-1 py-1 backdrop-blur">
         <ToggleButton
           active={mode === "pretty"}
           disabled={!projection}
@@ -484,7 +484,7 @@ function FinalChatView({
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-1">
+      <div className="sticky top-0 z-10 -mx-1 flex items-center gap-1 bg-panel2/95 px-1 py-1 backdrop-blur">
         <ToggleButton
           active={mode === "pretty"}
           disabled={!turns.length}

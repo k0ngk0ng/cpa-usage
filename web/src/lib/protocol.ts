@@ -77,7 +77,9 @@ function instructionToText(raw: unknown): string {
 
 function messageToTurn(raw: unknown): Turn {
   const m = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-  const role = String(m.role || "user");
+  const explicitRole = stringValue(m.role);
+  const type = stringValue(m.type);
+  const role = explicitRole || "user";
   const content = m.content ?? m.text;
   let text = "";
   const attachments: string[] = [];
@@ -128,6 +130,9 @@ function messageToTurn(raw: unknown): Turn {
     text = instructionToText(content);
   }
 
+  if (!explicitRole && type && type !== "message" && !text && attachments.length === 0) {
+    return typedItemToTurn(m, type);
+  }
   return { role, text, attachments: attachments.length ? attachments : undefined };
 }
 
@@ -298,7 +303,10 @@ function markHidden(out: { encrypted?: boolean; hiddenType?: string }, type: str
 // turns so they don't show up as "user (empty)".
 function responsesInputToTurn(raw: unknown): Turn {
   const m = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-  const type = String(m.type || "");
+  const type = stringValue(m.type);
+  if (!type || type === "message") {
+    return messageToTurn(raw);
+  }
   if (type === "function_call") {
     const name = String(m.name || "tool");
     const args = typeof m.arguments === "string" ? m.arguments : JSON.stringify(m.arguments ?? {});
@@ -339,8 +347,54 @@ function responsesInputToTurn(raw: unknown): Turn {
     }
     return { role: "assistant", text: "", attachments: ["reasoning"] };
   }
-  // Default: messages, and anything else with a `role`+`content` shape.
-  return messageToTurn(raw);
+  return typedItemToTurn(m, type);
+}
+
+function typedItemToTurn(item: Record<string, unknown>, type: string): Turn {
+  return {
+    role: type,
+    text: typedItemMarkdown(item, type),
+  };
+}
+
+function typedItemMarkdown(item: Record<string, unknown>, type: string): string {
+  const details = typedItemDetails(item);
+  const json = JSON.stringify(item, null, 2);
+  return [`**[${type}]**`, details, codeFence(json, "json")].filter(Boolean).join("\n\n");
+}
+
+function typedItemDetails(item: Record<string, unknown>): string {
+  const details: string[] = [];
+  const status = stringValue(item.status);
+  if (status) details.push(`- status: ${status}`);
+
+  const action = objectValue(item.action);
+  if (action) {
+    const actionType = stringValue(action.type);
+    if (actionType) details.push(`- action: ${actionType}`);
+    const query = stringValue(action.query);
+    if (query) details.push(`- query: ${query}`);
+  }
+
+  return details.join("\n");
+}
+
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function isKnownResponsesOutputType(type: string): boolean {
+  return (
+    type === "message" ||
+    type === "function_call" ||
+    type === "custom_tool_call" ||
+    type === "function_call_output" ||
+    type === "custom_tool_call_output" ||
+    type === "image_generation_call" ||
+    type === "reasoning"
+  );
 }
 
 function toolUseMarkdown(name: string, rawCallID: unknown, input: string, language = ""): string {
@@ -569,6 +623,7 @@ export function extractResponseStream(text: string): StreamExtraction {
       const item = (o.item as Record<string, unknown>) || {};
       const idx = typeof o.output_index === "number" ? (o.output_index as number) : -1;
       const existing = openAICalls.get(idx);
+      const itemType = stringValue(item.type);
       if (item.type === "function_call" || item.type === "custom_tool_call") {
         const input =
           item.type === "custom_tool_call"
@@ -581,6 +636,8 @@ export function extractResponseStream(text: string): StreamExtraction {
           order: existing?.order ?? openAICallOrder++,
           custom: item.type === "custom_tool_call" || existing?.custom,
         });
+      } else if (itemType && !isKnownResponsesOutputType(itemType)) {
+        appendResponseMarkdown(out, typedItemMarkdown(item, itemType));
       }
     }
     if (o.type === "response.function_call_arguments.done") {
@@ -806,6 +863,12 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
           markHidden(out, "reasoning");
           out.detected = true;
         }
+        continue;
+      }
+      const itemType = stringValue(it.type);
+      if (itemType && !isKnownResponsesOutputType(itemType)) {
+        appendResponseMarkdown(out, typedItemMarkdown(it, itemType));
+        out.detected = true;
         continue;
       }
       const c = it.content;
