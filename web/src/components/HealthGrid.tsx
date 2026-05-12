@@ -1,43 +1,39 @@
 import { Link } from "react-router-dom";
 import clsx from "clsx";
-import type { Filter, HealthCell, UsageHealthMonth } from "../api/types";
+import type { Filter, HealthCell, UsageHealthDay, UsageHealthMatrix } from "../api/types";
 import { formatTimestamp } from "../lib/utils";
 
 interface Props {
-  // Outer = days (chronological), inner = 96 cells per day (15-minute spans).
-  grid: HealthCell[][];
+  health: UsageHealthMatrix;
   filter?: Filter;
-  month?: string;
-  months?: UsageHealthMonth[];
-  onMonthChange?: (month: string) => void;
+  selectedDay?: string;
+  onYearChange: (year: string) => void;
+  onDaySelect: (day: string) => void;
 }
 
-function cellTone(cell: HealthCell, maxTotal: number): string {
-  if (cell.total === 0) return "bg-panel2";
-  const failRate = cell.failed / cell.total;
+interface YearCell {
+  key: string;
+  day?: UsageHealthDay;
+  inYear: boolean;
+  future: boolean;
+}
+
+function cellTone(total: number, failed: number, maxTotal: number): string {
+  if (total === 0) return "bg-panel2";
+  const failRate = failed / total;
   if (failRate >= 0.5) return "bg-danger/80";
   if (failRate > 0) return "bg-warn/70";
-  const intensity = maxTotal > 0 ? cell.total / maxTotal : 0;
+  const intensity = maxTotal > 0 ? total / maxTotal : 0;
   if (intensity >= 0.66) return "bg-success";
   if (intensity >= 0.33) return "bg-success/70";
   return "bg-success/40";
 }
 
-export default function HealthGrid({ grid, filter, month, months = [], onMonthChange }: Props) {
-  if (!grid || grid.length === 0) {
-    return (
-      <div className="bg-panel border border-border rounded-lg p-6 text-muted text-sm text-center">
-        No health data.
-      </div>
-    );
-  }
-  const days = grid.map((day) => ({
-    label: dayLabel(day),
-    title: dayTitle(day),
-    hours: hourlyCells(day),
-  }));
-  const maxTotal = Math.max(0, ...days.flatMap((day) => day.hours.map((cell) => cell.total)));
-  const monthOptions = monthSelectOptions(month, months);
+export default function HealthGrid({ health, filter, selectedDay, onYearChange, onDaySelect }: Props) {
+  const weeks = buildYearWeeks(health.year, health.days || []);
+  const maxDayTotal = Math.max(0, ...(health.days || []).map((day) => day.total));
+  const selected = health.selected_day || selectedDay || "";
+  const years = yearSelectOptions(health.year, health.years || []);
 
   return (
     <div className="bg-panel border border-border rounded-lg p-4">
@@ -45,59 +41,140 @@ export default function HealthGrid({ grid, filter, month, months = [], onMonthCh
         <h3 className="text-sm font-medium">Request matrix</h3>
         <div className="flex flex-wrap items-center gap-3">
           <Legend />
-          {onMonthChange && (
-            <select
-              value={month || ""}
-              onChange={(e) => onMonthChange(e.target.value)}
-              className="bg-panel2 border border-border rounded px-2 py-1 text-xs text-ink"
-              title="Request matrix month"
-            >
-              {monthOptions.map((m) => (
-                <option key={m.month} value={m.month}>
-                  {formatMonthLabel(m.month)}
-                  {m.total ? ` (${m.total.toLocaleString()})` : ""}
-                </option>
-              ))}
-            </select>
-          )}
+          <select
+            value={String(health.year)}
+            onChange={(e) => onYearChange(e.target.value)}
+            className="bg-panel2 border border-border rounded px-2 py-1 text-xs text-ink"
+            title="Request matrix year"
+          >
+            {years.map((y) => (
+              <option key={y.year} value={y.year}>
+                {y.year}
+                {y.total ? ` (${y.total.toLocaleString()})` : ""}
+              </option>
+            ))}
+          </select>
         </div>
+      </div>
+
+      <div className="overflow-x-auto pb-1">
+        <div
+          className="inline-grid items-center gap-[2px]"
+          style={{ gridTemplateColumns: `3rem repeat(${weeks.length}, 1.25rem)` }}
+        >
+          <div className="h-4" />
+          {monthLabels(weeks).map((label, index) => (
+            <div key={index} className="h-4 text-[9px] leading-4 text-muted">
+              {label}
+            </div>
+          ))}
+          {weekdayLabels.map((label, dow) => (
+            <div key={label} className="contents">
+              <div className="h-5 pr-2 text-right text-[9px] leading-5 text-muted tabular-nums">
+                {label}
+              </div>
+              {weeks.map((week, wi) => {
+                const cell = week[dow];
+                return (
+                  <YearDayCell
+                    key={`${wi}-${dow}`}
+                    cell={cell}
+                    maxTotal={maxDayTotal}
+                    selected={selected === cell.key}
+                    onSelect={onDaySelect}
+                  />
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {selected ? (
+        <DayDetail
+          day={selected}
+          grid={health.detail || []}
+          filter={filter}
+        />
+      ) : (
+        <div className="mt-4 border-t border-border pt-3 text-xs text-muted">
+          Select a day to inspect 5-minute traffic.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function YearDayCell({
+  cell,
+  maxTotal,
+  selected,
+  onSelect,
+}: {
+  cell: YearCell;
+  maxTotal: number;
+  selected: boolean;
+  onSelect: (day: string) => void;
+}) {
+  if (!cell.inYear) {
+    return <div className="h-5 w-5" />;
+  }
+  const day = cell.day;
+  const total = day?.total ?? 0;
+  const failed = day?.failed ?? 0;
+  const title = `${cell.key} — ${total} requests, ${failed} failed`;
+  return (
+    <button
+      type="button"
+      disabled={cell.future}
+      onClick={() => onSelect(cell.key)}
+      className={clsx(
+        "h-5 w-5 rounded-[3px] transition-shadow focus:outline-none focus:ring-1 focus:ring-accent",
+        cell.future ? "bg-panel2/40 opacity-50" : cellTone(total, failed, maxTotal),
+        !cell.future && "hover:ring-1 hover:ring-accent",
+        selected && "ring-1 ring-accent",
+      )}
+      title={title}
+      aria-label={`Inspect ${title}`}
+    />
+  );
+}
+
+function DayDetail({ day, grid, filter }: { day: string; grid: HealthCell[][]; filter?: Filter }) {
+  const maxTotal = Math.max(0, ...grid.flatMap((row) => row.map((cell) => cell.total)));
+  return (
+    <div className="mt-4 border-t border-border pt-3">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <h4 className="text-xs font-medium text-muted">{day} 5-minute distribution</h4>
+        <span className="text-[11px] text-muted">6 rows x 48 windows</span>
       </div>
       <div className="overflow-x-auto pb-1">
         <div
           className="inline-grid items-center gap-[2px]"
-          style={{ gridTemplateColumns: `3.75rem repeat(${days.length}, 1.25rem)` }}
+          style={{ gridTemplateColumns: "3.75rem repeat(48, 1.25rem)" }}
         >
-          <div className="h-6" />
-          {days.map((day, di) => (
-            <div key={di} className="h-6 text-center text-[9px] leading-6 text-muted tabular-nums">
-              <span title={day.title}>{dayOfMonthLabel(day)}</span>
-            </div>
-          ))}
-          {Array.from({ length: 24 }, (_, hour) => (
-            <div key={hour} className="contents">
+          {grid.map((row, ri) => (
+            <div key={ri} className="contents">
               <div className="h-5 pr-2 text-right text-[9px] leading-5 text-muted tabular-nums">
-                {hourTickLabel(hour)}
+                {detailRowLabel(ri)}
               </div>
-              {days.map((day, di) => {
-                const cell = day.hours[hour];
-                const title = `${day.title} ${hourLabel(hour)} — ${cell.total} requests, ${cell.failed} failed${
-                  cell.bucket ? ` (${formatTimestamp(cell.bucket)})` : ""
-                }`;
+              {row.map((cell, ci) => {
+                const title = `${formatTimestamp(cell.bucket)} — ${cell.total} requests, ${cell.failed} failed`;
                 return (
-                  <div key={`${di}-${hour}`} className="flex h-5 items-center justify-center">
+                  <div key={`${ri}-${ci}`} className="flex h-5 items-center justify-center">
                     {cell.total > 0 && cell.bucket ? (
                       <Link
-                        to={{ pathname: "/events", search: eventSearch(cell, filter) }}
+                        to={{ pathname: "/events", search: eventSearch(cell, filter, 5) }}
                         className={clsx(
                           "block h-5 w-5 rounded-[3px] transition-shadow hover:ring-1 hover:ring-accent focus:outline-none focus:ring-1 focus:ring-accent",
-                          cellTone(cell, maxTotal),
+                          cellTone(cell.total, cell.failed, maxTotal),
                         )}
                         title={title}
                         aria-label={`Open events for ${title}`}
                       />
                     ) : (
                       <div
-                        className={clsx("h-5 w-5 rounded-[3px]", cellTone(cell, maxTotal))}
+                        className={clsx("h-5 w-5 rounded-[3px]", cellTone(cell.total, cell.failed, maxTotal))}
                         title={title}
                       />
                     )}
@@ -112,23 +189,55 @@ export default function HealthGrid({ grid, filter, month, months = [], onMonthCh
   );
 }
 
-function monthSelectOptions(selected: string | undefined, months: UsageHealthMonth[]): UsageHealthMonth[] {
-  if (!selected) return months;
-  if (months.some((m) => m.month === selected)) return months;
-  return [{ month: selected, total: 0 }, ...months].sort((a, b) => b.month.localeCompare(a.month));
+function buildYearWeeks(year: number, days: UsageHealthDay[]): YearCell[][] {
+  const byDate = new Map(days.map((day) => [day.date, day]));
+  const yearStart = new Date(year, 0, 1);
+  const yearEnd = new Date(year, 11, 31);
+  const gridStart = addDays(yearStart, -yearStart.getDay());
+  const gridEnd = addDays(yearEnd, 6 - yearEnd.getDay());
+  const today = startOfLocalDay(new Date());
+  const weeks: YearCell[][] = [];
+
+  for (let weekStart = gridStart; weekStart <= gridEnd; weekStart = addDays(weekStart, 7)) {
+    const week: YearCell[] = [];
+    for (let dow = 0; dow < 7; dow += 1) {
+      const date = addDays(weekStart, dow);
+      const key = dateKey(date);
+      const inYear = date.getFullYear() === year;
+      week.push({
+        key,
+        day: byDate.get(key),
+        inYear,
+        future: inYear && startOfLocalDay(date).getTime() > today.getTime(),
+      });
+    }
+    weeks.push(week);
+  }
+  return weeks;
 }
 
-function formatMonthLabel(month: string): string {
-  const [year, rawMonth] = month.split("-");
-  const index = Number(rawMonth) - 1;
-  if (!year || !Number.isInteger(index) || index < 0 || index > 11) return month;
-  return `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][index]} ${year}`;
+function monthLabels(weeks: YearCell[][]): string[] {
+  let lastMonth = -1;
+  return weeks.map((week) => {
+    const first = week.find((cell) => cell.inYear);
+    if (!first) return "";
+    const d = parseDateKey(first.key);
+    const month = d.getMonth();
+    if (month === lastMonth) return "";
+    lastMonth = month;
+    return monthNames[month];
+  });
 }
 
-function eventSearch(cell: HealthCell, filter?: Filter): string {
+function yearSelectOptions(selected: number, years: { year: number; total: number }[]): { year: number; total: number }[] {
+  if (years.some((y) => y.year === selected)) return years;
+  return [{ year: selected, total: 0 }, ...years].sort((a, b) => b.year - a.year);
+}
+
+function eventSearch(cell: HealthCell, filter: Filter | undefined, minutes: number): string {
   const start = new Date(cell.bucket);
   if (Number.isNaN(start.getTime())) return "";
-  const end = new Date(start.getTime() + 60 * 60 * 1000);
+  const end = new Date(start.getTime() + minutes * 60 * 1000);
   const sp = new URLSearchParams();
   sp.set("range", "custom");
   sp.set("start", formatDateTimeParam(start));
@@ -151,50 +260,34 @@ function formatDateTimeParam(d: Date): string {
   return `${year}-${month}-${day}T${hour}:${minute}:${second}`;
 }
 
-function hourlyCells(day: HealthCell[]): HealthCell[] {
-  return Array.from({ length: 24 }, (_, hour) => {
-    const cells = day.slice(hour * 4, hour * 4 + 4);
-    return {
-      bucket: cells[0]?.bucket ?? "",
-      total: cells.reduce((sum, cell) => sum + cell.total, 0),
-      failed: cells.reduce((sum, cell) => sum + cell.failed, 0),
-    };
-  });
+function detailRowLabel(row: number): string {
+  return `${String(row * 4).padStart(2, "0")}:00`;
 }
 
-function dayLabel(day: HealthCell[]): string {
-  if (day.length === 0) return "";
-  const d = new Date(day[0].bucket);
-  if (Number.isNaN(d.getTime())) return "";
-  return `${d.getMonth() + 1}/${d.getDate()}`;
+function dateKey(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
-function dayTitle(day: HealthCell[]): string {
-  if (day.length === 0) return "";
-  const d = new Date(day[0].bucket);
-  if (Number.isNaN(d.getTime())) return "";
-  return `${weekdayLabel(d)} ${d.getMonth() + 1}/${d.getDate()}`;
+function parseDateKey(key: string): Date {
+  const [year, month, day] = key.split("-").map(Number);
+  return new Date(year, month - 1, day);
 }
 
-function dayOfMonthLabel(day: { label: string; title: string; hours: HealthCell[] }): string {
-  const first = day.hours[0]?.bucket;
-  if (!first) return day.label;
-  const d = new Date(first);
-  if (Number.isNaN(d.getTime())) return day.label;
-  return String(d.getDate());
+function addDays(d: Date, days: number): Date {
+  const out = new Date(d);
+  out.setDate(out.getDate() + days);
+  return out;
 }
 
-function weekdayLabel(d: Date): string {
-  return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()];
+function startOfLocalDay(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
 
-function hourLabel(hour: number): string {
-  return `${String(hour).padStart(2, "0")}:00-${String((hour + 1) % 24).padStart(2, "0")}:00`;
-}
-
-function hourTickLabel(hour: number): string {
-  return hour % 3 === 0 ? `${String(hour).padStart(2, "0")}:00` : "";
-}
+const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function Legend() {
   const items = [

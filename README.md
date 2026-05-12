@@ -93,6 +93,7 @@ All endpoints are mounted under `<APP_BASE_PATH>/api/v1`. Protected endpoints re
 | GET | `/status` | drain status (last pop, errors, totals) |
 | POST | `/sync` | trigger metadata refresh |
 | GET | `/usage/overview` | summary + hourly + daily + range-sized 15-minute health grid |
+| GET | `/usage/health` | year request matrix + optional selected-day 5-minute detail |
 | GET | `/usage/analysis` | aggregations by API / model / both |
 | GET | `/usage/events` | paginated raw events |
 | GET | `/usage/events/filters` | distinct models + sources |

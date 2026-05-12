@@ -594,35 +594,70 @@ func (s *Store) healthGrid(ctx context.Context, f storage.UsageFilter, now time.
 	return s.healthGridRange(ctx, healthFilter)
 }
 
-// BuildUsageHealthGrid returns an uncapped day/hour matrix for an explicit
-// range. The request matrix uses this for natural months, including 31-day
-// months, while the overview summary keeps its compact rolling-window grid.
-func (s *Store) BuildUsageHealthGrid(ctx context.Context, f storage.UsageFilter, start, end time.Time) ([][]storage.HealthCell, error) {
+func (s *Store) BuildUsageHealthDays(ctx context.Context, f storage.UsageFilter, start, end time.Time) ([]storage.UsageHealthDay, error) {
 	healthFilter := f
 	healthFilter.Start = start
 	healthFilter.End = end
-	return s.healthGridRange(ctx, healthFilter)
+	type row struct {
+		Date   string
+		Total  int64
+		Failed int64
+	}
+	var rows []row
+	if err := s.applyFilter(ctx, healthFilter).
+		Select(`strftime('%Y-%m-%d', timestamp, 'localtime') AS date,
+			COUNT(*) AS total,
+			SUM(CASE WHEN failed = 1 THEN 1 ELSE 0 END) AS failed`).
+		Group("date").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	byDate := make(map[string]storage.UsageHealthDay, len(rows))
+	for _, r := range rows {
+		t, err := time.ParseInLocation("2006-01-02", r.Date, time.Local)
+		if err != nil {
+			continue
+		}
+		byDate[r.Date] = storage.UsageHealthDay{Date: r.Date, Bucket: t, Total: r.Total, Failed: r.Failed}
+	}
+	days := make([]storage.UsageHealthDay, 0, int(end.Sub(start).Hours()/24))
+	for day := start; day.Before(end); day = day.AddDate(0, 0, 1) {
+		key := day.Format("2006-01-02")
+		if cell, ok := byDate[key]; ok {
+			days = append(days, cell)
+		} else {
+			days = append(days, storage.UsageHealthDay{Date: key, Bucket: day})
+		}
+	}
+	return days, nil
 }
 
-func (s *Store) ListUsageEventMonths(ctx context.Context, f storage.UsageFilter) ([]storage.UsageHealthMonth, error) {
+func (s *Store) BuildUsageHealthDetail(ctx context.Context, f storage.UsageFilter, day time.Time) ([][]storage.HealthCell, error) {
+	healthFilter := f
+	healthFilter.Start = day
+	healthFilter.End = day.AddDate(0, 0, 1)
+	return s.healthDetailRange(ctx, healthFilter)
+}
+
+func (s *Store) ListUsageEventYears(ctx context.Context, f storage.UsageFilter) ([]storage.UsageHealthYear, error) {
 	type row struct {
-		Month string
+		Year  int
 		Total int64
 	}
 	var rows []row
 	if err := s.applyFilter(ctx, f).
-		Select(`strftime('%Y-%m', timestamp, 'localtime') AS month, COUNT(*) AS total`).
-		Group("month").
-		Order("month DESC").
+		Select(`CAST(strftime('%Y', timestamp, 'localtime') AS INTEGER) AS year, COUNT(*) AS total`).
+		Group("year").
+		Order("year DESC").
 		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
-	out := make([]storage.UsageHealthMonth, 0, len(rows))
+	out := make([]storage.UsageHealthYear, 0, len(rows))
 	for _, r := range rows {
-		if r.Month == "" {
+		if r.Year <= 0 {
 			continue
 		}
-		out = append(out, storage.UsageHealthMonth{Month: r.Month, Total: r.Total})
+		out = append(out, storage.UsageHealthYear{Year: r.Year, Total: r.Total})
 	}
 	return out, nil
 }
@@ -668,6 +703,46 @@ func (s *Store) healthGridRange(ctx context.Context, healthFilter storage.UsageF
 			}
 		}
 		grid[d] = row
+	}
+	return grid, nil
+}
+
+func (s *Store) healthDetailRange(ctx context.Context, healthFilter storage.UsageFilter) ([][]storage.HealthCell, error) {
+	type row struct {
+		Bucket string
+		Total  int64
+		Failed int64
+	}
+	var rows []row
+	if err := s.applyFilter(ctx, healthFilter).
+		Select(`strftime('%Y-%m-%d %H:%M', datetime((strftime('%s', timestamp) / 300) * 300, 'unixepoch')) AS bucket,
+			COUNT(*) AS total,
+			SUM(CASE WHEN failed = 1 THEN 1 ELSE 0 END) AS failed`).
+		Group("bucket").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	bucketMap := make(map[time.Time]storage.HealthCell, len(rows))
+	for _, r := range rows {
+		t, err := time.Parse("2006-01-02 15:04", r.Bucket)
+		if err != nil {
+			continue
+		}
+		bucketMap[t.UTC()] = storage.HealthCell{Bucket: t.UTC(), Total: r.Total, Failed: r.Failed}
+	}
+
+	grid := make([][]storage.HealthCell, 6)
+	for row := 0; row < 6; row++ {
+		grid[row] = make([]storage.HealthCell, 48)
+		for col := 0; col < 48; col++ {
+			offset := time.Duration(row*48+col) * 5 * time.Minute
+			b := healthFilter.Start.Add(offset).UTC()
+			if cell, ok := bucketMap[b]; ok {
+				grid[row][col] = cell
+			} else {
+				grid[row][col] = storage.HealthCell{Bucket: b}
+			}
+		}
 	}
 	return grid, nil
 }

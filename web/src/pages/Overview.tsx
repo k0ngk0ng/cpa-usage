@@ -13,7 +13,8 @@ export default function Overview() {
   const { filter, setFilter } = useFilter(todayFilter);
   const [data, setData] = useState<UsageOverview | null>(null);
   const [health, setHealth] = useState<UsageHealthMatrix | null>(null);
-  const [healthMonth, setHealthMonth] = useState<string>("");
+  const [healthYear, setHealthYear] = useState<string>("");
+  const [selectedDay, setSelectedDay] = useState<string>("");
   const [healthLoading, setHealthLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -45,7 +46,7 @@ export default function Overview() {
     setHealthLoading(true);
     setHealthErr(null);
     api
-      .health(filter, healthMonth || undefined)
+      .health(filter, healthYear || undefined, selectedDay || undefined)
       .then((d) => {
         if (!cancelled) setHealth(d);
       })
@@ -64,7 +65,8 @@ export default function Overview() {
     filter.apiKey,
     filter.authIndex,
     filter.result,
-    healthMonth,
+    healthYear,
+    selectedDay,
     tick,
   ]);
 
@@ -146,14 +148,21 @@ export default function Overview() {
             <div className="bg-panel border border-border rounded-lg p-8 text-center text-muted text-sm">
               Loading…
             </div>
-          ) : (
+          ) : health ? (
             <HealthGrid
-              grid={health?.grid || []}
+              health={health}
               filter={filter}
-              month={health?.month || healthMonth}
-              months={health?.months || []}
-              onMonthChange={setHealthMonth}
+              selectedDay={selectedDay}
+              onYearChange={(year) => {
+                setHealthYear(year);
+                setSelectedDay("");
+              }}
+              onDaySelect={setSelectedDay}
             />
+          ) : (
+            <div className="bg-panel border border-border rounded-lg p-6 text-muted text-sm text-center">
+              No request matrix data.
+            </div>
           )}
         </div>
       </div>

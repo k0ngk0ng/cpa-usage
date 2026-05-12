@@ -64,7 +64,7 @@ func usageHealthHandler(deps UsageDeps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		out, err := deps.Service.Health(c.Request.Context(), f, c.Query("month"), time.Now().In(time.Local))
+		out, err := deps.Service.Health(c.Request.Context(), f, c.Query("year"), c.Query("day"), time.Now().In(time.Local))
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return

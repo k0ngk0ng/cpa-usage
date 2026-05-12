@@ -74,17 +74,26 @@ export interface UsageOverview {
   generated_at: string;
 }
 
-export interface UsageHealthMonth {
-  month: string;
+export interface UsageHealthYear {
+  year: number;
   total: number;
 }
 
+export interface UsageHealthDay {
+  date: string;
+  bucket: string;
+  total: number;
+  failed: number;
+}
+
 export interface UsageHealthMatrix {
-  month: string;
+  year: number;
   start: string;
   end: string;
-  grid: HealthCell[][];
-  months: UsageHealthMonth[];
+  days: UsageHealthDay[];
+  years: UsageHealthYear[];
+  selected_day?: string;
+  detail?: HealthCell[][];
 }
 
 export interface UsageEventRecord {

@@ -26,8 +26,9 @@ type Store interface {
 
 	// Aggregations
 	BuildUsageOverview(ctx context.Context, f UsageFilter, prices map[string]ModelPriceSetting) (*UsageOverview, error)
-	BuildUsageHealthGrid(ctx context.Context, f UsageFilter, start, end time.Time) ([][]HealthCell, error)
-	ListUsageEventMonths(ctx context.Context, f UsageFilter) ([]UsageHealthMonth, error)
+	BuildUsageHealthDays(ctx context.Context, f UsageFilter, start, end time.Time) ([]UsageHealthDay, error)
+	BuildUsageHealthDetail(ctx context.Context, f UsageFilter, day time.Time) ([][]HealthCell, error)
+	ListUsageEventYears(ctx context.Context, f UsageFilter) ([]UsageHealthYear, error)
 	ListUsageEvents(ctx context.Context, f UsageFilter, p Page, prices map[string]ModelPriceSetting) (*UsageEventsPage, error)
 	ListUsageEventFilterOptions(ctx context.Context, f UsageFilter) (*UsageEventFilterOptions, error)
 	ListUsageEventAPIKeys(ctx context.Context, f UsageFilter) ([]string, error)

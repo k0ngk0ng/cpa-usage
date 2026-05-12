@@ -199,19 +199,30 @@ type UsageOverview struct {
 	GeneratedAt  time.Time      `json:"generated_at"`
 }
 
-// UsageHealthMonth is one month option available for the request matrix.
-type UsageHealthMonth struct {
-	Month string `json:"month"`
-	Total int64  `json:"total"`
+// UsageHealthYear is one year option available for the request matrix.
+type UsageHealthYear struct {
+	Year  int   `json:"year"`
+	Total int64 `json:"total"`
 }
 
-// UsageHealthMatrix is the month-sized request matrix payload.
+// UsageHealthDay is one day cell in the year-sized request matrix.
+type UsageHealthDay struct {
+	Date   string    `json:"date"`
+	Bucket time.Time `json:"bucket"`
+	Total  int64     `json:"total"`
+	Failed int64     `json:"failed"`
+}
+
+// UsageHealthMatrix is the year-sized request matrix payload plus optional
+// selected-day 5-minute detail rows.
 type UsageHealthMatrix struct {
-	Month  string             `json:"month"`
-	Start  time.Time          `json:"start"`
-	End    time.Time          `json:"end"`
-	Grid   [][]HealthCell     `json:"grid"`
-	Months []UsageHealthMonth `json:"months"`
+	Year        int               `json:"year"`
+	Start       time.Time         `json:"start"`
+	End         time.Time         `json:"end"`
+	Days        []UsageHealthDay  `json:"days"`
+	Years       []UsageHealthYear `json:"years"`
+	SelectedDay string            `json:"selected_day,omitempty"`
+	Detail      [][]HealthCell    `json:"detail,omitempty"`
 }
 
 // UsageSummary is the aggregated totals shown in the overview header.

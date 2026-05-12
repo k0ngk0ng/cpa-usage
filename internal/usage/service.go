@@ -134,37 +134,42 @@ func (s *Service) Overview(ctx context.Context, f Filter) (*storage.UsageOvervie
 	return s.store.BuildUsageOverview(ctx, f.toStorage(), prices)
 }
 
-// Health returns the month-sized request matrix and the available month list.
-func (s *Service) Health(ctx context.Context, f Filter, monthKey string, now time.Time) (*storage.UsageHealthMatrix, error) {
-	start, err := parseMonth(monthKey, now)
+// Health returns the year-sized request matrix and optional selected-day detail.
+func (s *Service) Health(ctx context.Context, f Filter, yearKey, dayKey string, now time.Time) (*storage.UsageHealthMatrix, error) {
+	year, err := parseYear(yearKey, now)
 	if err != nil {
 		return nil, err
 	}
-	end := start.AddDate(0, 1, 0)
+	start := time.Date(year, time.January, 1, 0, 0, 0, 0, time.Local)
+	end := start.AddDate(1, 0, 0)
 	sf := f.toStorage()
 	sf.Range = ""
 	sf.Start = time.Time{}
 	sf.End = time.Time{}
 
-	months, err := s.store.ListUsageEventMonths(ctx, sf)
+	years, err := s.store.ListUsageEventYears(ctx, sf)
 	if err != nil {
 		return nil, err
 	}
-	month := start.Format("2006-01")
 	localNow := now.In(time.Local)
-	currentMonth := time.Date(localNow.Year(), localNow.Month(), 1, 0, 0, 0, 0, time.Local).Format("2006-01")
-	months = ensureMonthOption(ensureMonthOption(months, month), currentMonth)
+	years = ensureYearOption(ensureYearOption(years, year), localNow.Year())
 
-	grid, err := s.store.BuildUsageHealthGrid(ctx, sf, start, end)
+	days, err := s.store.BuildUsageHealthDays(ctx, sf, start, end)
+	if err != nil {
+		return nil, err
+	}
+	selectedDay, detail, err := s.healthDetail(ctx, sf, start, end, dayKey)
 	if err != nil {
 		return nil, err
 	}
 	return &storage.UsageHealthMatrix{
-		Month:  month,
-		Start:  start,
-		End:    end,
-		Grid:   grid,
-		Months: months,
+		Year:        year,
+		Start:       start,
+		End:         end,
+		Days:        days,
+		Years:       years,
+		SelectedDay: selectedDay,
+		Detail:      detail,
 	}, nil
 }
 
@@ -358,27 +363,54 @@ func parseTime(in string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unrecognized time %q", in)
 }
 
-func parseMonth(in string, now time.Time) (time.Time, error) {
-	in = strings.TrimSpace(in)
-	if in == "" {
-		local := now.In(time.Local)
-		return time.Date(local.Year(), local.Month(), 1, 0, 0, 0, 0, time.Local), nil
+func (s *Service) healthDetail(ctx context.Context, f storage.UsageFilter, yearStart, yearEnd time.Time, dayKey string) (string, [][]storage.HealthCell, error) {
+	dayKey = strings.TrimSpace(dayKey)
+	if dayKey == "" {
+		return "", nil, nil
 	}
-	t, err := time.ParseInLocation("2006-01", in, time.Local)
+	day, err := parseDay(dayKey)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("parse month: %w", err)
+		return "", nil, err
 	}
-	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.Local), nil
+	if day.Before(yearStart) || !day.Before(yearEnd) {
+		return "", nil, fmt.Errorf("day %q is outside selected year", dayKey)
+	}
+	detail, err := s.store.BuildUsageHealthDetail(ctx, f, day)
+	if err != nil {
+		return "", nil, err
+	}
+	return day.Format("2006-01-02"), detail, nil
 }
 
-func ensureMonthOption(months []storage.UsageHealthMonth, month string) []storage.UsageHealthMonth {
-	for _, m := range months {
-		if m.Month == month {
-			return months
+func parseYear(in string, now time.Time) (int, error) {
+	in = strings.TrimSpace(in)
+	if in == "" {
+		return now.In(time.Local).Year(), nil
+	}
+	t, err := time.ParseInLocation("2006", in, time.Local)
+	if err != nil {
+		return 0, fmt.Errorf("parse year: %w", err)
+	}
+	return t.Year(), nil
+}
+
+func parseDay(in string) (time.Time, error) {
+	in = strings.TrimSpace(in)
+	t, err := time.ParseInLocation("2006-01-02", in, time.Local)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse day: %w", err)
+	}
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.Local), nil
+}
+
+func ensureYearOption(years []storage.UsageHealthYear, year int) []storage.UsageHealthYear {
+	for _, y := range years {
+		if y.Year == year {
+			return years
 		}
 	}
-	out := append([]storage.UsageHealthMonth{{Month: month}}, months...)
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Month > out[j].Month })
+	out := append([]storage.UsageHealthYear{{Year: year}}, years...)
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Year > out[j].Year })
 	return out
 }
 

@@ -138,9 +138,9 @@ export const api = {
   async overview(filter: Filter): Promise<UsageOverview> {
     return request<UsageOverview>("/usage/overview" + buildQuery(filter));
   },
-  async health(filter: Filter, month?: string): Promise<UsageHealthMatrix> {
+  async health(filter: Filter, year?: string, day?: string): Promise<UsageHealthMatrix> {
     return request<UsageHealthMatrix>(
-      "/usage/health" + buildFacetQuery(filter, { month }),
+      "/usage/health" + buildFacetQuery(filter, { year, day }),
     );
   },
   async analysis(filter: Filter): Promise<UsageAnalysis> {
