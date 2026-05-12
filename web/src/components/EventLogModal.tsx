@@ -4,7 +4,7 @@ import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api, HttpError } from "../api/client";
 import type { APIResponseAttempt, EventLogEntry, UsageEventRecord } from "../api/types";
-import { formatBytes, formatTimestamp } from "../lib/utils";
+import { formatBytes, formatCost, formatLatency, formatNumber, formatTimestamp } from "../lib/utils";
 import {
   extractRequestTurns,
   extractRequestToolDeclarations,
@@ -145,7 +145,7 @@ export default function EventLogModal({ event, onClose }: Props) {
     };
   }, [event.request_id]);
 
-  const tabs: Tab[] = useMemo(() => buildTabs(entry), [entry]);
+  const tabs: Tab[] = useMemo(() => buildTabs(entry, event), [entry, event]);
 
   // If a previously-selected tab disappears (e.g., entry reloaded with fewer
   // attempts), fall back to the first tab.
@@ -344,7 +344,7 @@ function isInteractiveTarget(target: EventTarget): boolean {
   return target instanceof Element && !!target.closest("button, a, input, textarea, select, [data-no-drag]");
 }
 
-function buildTabs(entry: EventLogEntry | null): Tab[] {
+function buildTabs(entry: EventLogEntry | null, event: UsageEventRecord): Tab[] {
   if (!entry) return [];
   const tabs: Tab[] = [];
 
@@ -353,6 +353,10 @@ function buildTabs(entry: EventLogEntry | null): Tab[] {
     label: "Info",
     render: () => (
       <Panel>
+        <div className="mb-3">
+          <Label>Event</Label>
+          <KVList map={eventRecordMap(event)} />
+        </div>
         <div className="mb-3">
           <Label>File</Label>
           <div className="font-mono text-[11px] break-all">{entry.file}</div>
@@ -434,6 +438,36 @@ function buildTabs(entry: EventLogEntry | null): Tab[] {
   });
 
   return tabs;
+}
+
+function eventRecordMap(event: UsageEventRecord): Record<string, string> {
+  return {
+    event_key: displayValue(event.event_key),
+    timestamp: displayValue(formatTimestamp(event.timestamp)),
+    provider: displayValue(event.provider),
+    model: displayValue(event.model),
+    api_group_key: displayValue(event.api_group_key),
+    api_group_display: displayValue(event.api_group_display),
+    source: displayValue(event.source),
+    source_display: displayValue(event.source_display),
+    auth_index: displayValue(event.auth_index),
+    auth_type: displayValue(event.auth_type),
+    endpoint: displayValue(event.endpoint),
+    request_id: displayValue(event.request_id),
+    latency_ms: displayValue(`${event.latency_ms} (${formatLatency(event.latency_ms)})`),
+    input_tokens: formatNumber(event.input_tokens),
+    cached_tokens: formatNumber(event.cached_tokens),
+    output_tokens: formatNumber(event.output_tokens),
+    reasoning_tokens: formatNumber(event.reasoning_tokens),
+    total_tokens: formatNumber(event.total_tokens),
+    failed: event.failed ? "true" : "false",
+    cost: formatCost(event.cost),
+  };
+}
+
+function displayValue(value: string | undefined | null): string {
+  const v = (value || "").trim();
+  return v || "—";
 }
 
 function APIResponsesView({ attempts }: { attempts: APIResponseAttempt[] }) {
