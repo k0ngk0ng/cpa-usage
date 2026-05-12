@@ -18,15 +18,21 @@ interface YearCell {
   future: boolean;
 }
 
-function cellTone(total: number, failed: number, maxTotal: number): string {
+function cellTone(total: number, maxTotal: number): string {
   if (total === 0) return "bg-panel2";
-  const failRate = failed / total;
-  if (failRate >= 0.5) return "bg-danger/80";
-  if (failRate > 0) return "bg-warn/70";
   const intensity = maxTotal > 0 ? total / maxTotal : 0;
-  if (intensity >= 0.66) return "bg-success";
-  if (intensity >= 0.33) return "bg-success/70";
-  return "bg-success/40";
+  if (intensity >= 0.75) return "bg-success";
+  if (intensity >= 0.5) return "bg-success/80";
+  if (intensity >= 0.25) return "bg-success/60";
+  return "bg-success/35";
+}
+
+function failureMarker(total: number, failed: number): string {
+  if (total === 0 || failed === 0) return "";
+  const failRate = failed / total;
+  if (failRate >= 0.5) return "ring-1 ring-danger";
+  if (failRate >= 0.1) return "ring-1 ring-warn";
+  return "ring-1 ring-success/45";
 }
 
 export default function HealthGrid({ health, filter, selectedDay, onYearChange, onDaySelect }: Props) {
@@ -130,7 +136,7 @@ function YearDayCell({
       onClick={() => onSelect(cell.key)}
       className={clsx(
         "h-5 w-5 rounded-[3px] transition-shadow focus:outline-none focus:ring-1 focus:ring-accent",
-        cell.future ? "bg-panel2/40 opacity-50" : cellTone(total, failed, maxTotal),
+        cell.future ? "bg-panel2/40 opacity-50" : [cellTone(total, maxTotal), failureMarker(total, failed)],
         !cell.future && "hover:ring-1 hover:ring-accent",
         selected && "ring-1 ring-accent",
       )}
@@ -167,14 +173,15 @@ function DayDetail({ day, grid, filter }: { day: string; grid: HealthCell[][]; f
                         to={{ pathname: "/events", search: eventSearch(cell, filter, 5) }}
                         className={clsx(
                           "block h-5 w-5 rounded-[3px] transition-shadow hover:ring-1 hover:ring-accent focus:outline-none focus:ring-1 focus:ring-accent",
-                          cellTone(cell.total, cell.failed, maxTotal),
+                          cellTone(cell.total, maxTotal),
+                          failureMarker(cell.total, cell.failed),
                         )}
                         title={title}
                         aria-label={`Open events for ${title}`}
                       />
                     ) : (
                       <div
-                        className={clsx("h-5 w-5 rounded-[3px]", cellTone(cell.total, cell.failed, maxTotal))}
+                        className={clsx("h-5 w-5 rounded-[3px]", cellTone(cell.total, maxTotal), failureMarker(cell.total, cell.failed))}
                         title={title}
                       />
                     )}
@@ -290,17 +297,28 @@ const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function Legend() {
-  const items = [
+  const volumeItems = [
     { tone: "bg-panel2", label: "no traffic" },
-    { tone: "bg-success/40", label: "less" },
-    { tone: "bg-success/70", label: "more" },
-    { tone: "bg-success", label: "most" },
-    { tone: "bg-warn/70", label: "some failures" },
-    { tone: "bg-danger/80", label: "many failures" },
+    { tone: "bg-success/35", label: "low" },
+    { tone: "bg-success/60", label: "medium" },
+    { tone: "bg-success/80", label: "high" },
+    { tone: "bg-success", label: "peak" },
+  ];
+  const failureItems = [
+    { tone: "bg-panel2 ring-1 ring-success/45", label: "<10% failed" },
+    { tone: "bg-panel2 ring-1 ring-warn", label: ">=10% failed" },
+    { tone: "bg-panel2 ring-1 ring-danger", label: ">=50% failed" },
   ];
   return (
-    <div className="flex items-center gap-3 text-[11px] text-muted">
-      {items.map((i) => (
+    <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted">
+      {volumeItems.map((i) => (
+        <div key={i.label} className="flex items-center gap-1">
+          <span className={clsx("inline-block w-3 h-3 rounded-sm", i.tone)} />
+          <span>{i.label}</span>
+        </div>
+      ))}
+      <span className="text-border">|</span>
+      {failureItems.map((i) => (
         <div key={i.label} className="flex items-center gap-1">
           <span className={clsx("inline-block w-3 h-3 rounded-sm", i.tone)} />
           <span>{i.label}</span>
