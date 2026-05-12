@@ -591,6 +591,43 @@ func (s *Store) healthGrid(ctx context.Context, f storage.UsageFilter, now time.
 		healthFilter.End = end
 		healthFilter.Start = end.Add(-30 * 24 * time.Hour)
 	}
+	return s.healthGridRange(ctx, healthFilter)
+}
+
+// BuildUsageHealthGrid returns an uncapped day/hour matrix for an explicit
+// range. The request matrix uses this for natural months, including 31-day
+// months, while the overview summary keeps its compact rolling-window grid.
+func (s *Store) BuildUsageHealthGrid(ctx context.Context, f storage.UsageFilter, start, end time.Time) ([][]storage.HealthCell, error) {
+	healthFilter := f
+	healthFilter.Start = start
+	healthFilter.End = end
+	return s.healthGridRange(ctx, healthFilter)
+}
+
+func (s *Store) ListUsageEventMonths(ctx context.Context, f storage.UsageFilter) ([]storage.UsageHealthMonth, error) {
+	type row struct {
+		Month string
+		Total int64
+	}
+	var rows []row
+	if err := s.applyFilter(ctx, f).
+		Select(`strftime('%Y-%m', timestamp, 'localtime') AS month, COUNT(*) AS total`).
+		Group("month").
+		Order("month DESC").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]storage.UsageHealthMonth, 0, len(rows))
+	for _, r := range rows {
+		if r.Month == "" {
+			continue
+		}
+		out = append(out, storage.UsageHealthMonth{Month: r.Month, Total: r.Total})
+	}
+	return out, nil
+}
+
+func (s *Store) healthGridRange(ctx context.Context, healthFilter storage.UsageFilter) ([][]storage.HealthCell, error) {
 	type row struct {
 		Bucket string
 		Total  int64

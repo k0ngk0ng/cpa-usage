@@ -74,6 +74,19 @@ export interface UsageOverview {
   generated_at: string;
 }
 
+export interface UsageHealthMonth {
+  month: string;
+  total: number;
+}
+
+export interface UsageHealthMatrix {
+  month: string;
+  start: string;
+  end: string;
+  grid: HealthCell[][];
+  months: UsageHealthMonth[];
+}
+
 export interface UsageEventRecord {
   event_key: string;
   timestamp: string;

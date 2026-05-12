@@ -4,7 +4,7 @@ import "time"
 
 // UsageEvent is one row decoded from the CPA redis usage queue.
 type UsageEvent struct {
-	EventKey        string    // request_id from CPA payload, used as dedup key
+	EventKey        string // request_id from CPA payload, used as dedup key
 	Timestamp       time.Time
 	Provider        string
 	Model           string
@@ -17,7 +17,7 @@ type UsageEvent struct {
 	RequestID       string
 	LatencyMs       int64
 	InputTokens     int64
-	OutputTokens   int64
+	OutputTokens    int64
 	ReasoningTokens int64
 	CachedTokens    int64
 	TotalTokens     int64
@@ -61,11 +61,11 @@ type ProviderMetadata struct {
 
 // ModelPriceSetting represents per-model pricing per 1M tokens.
 type ModelPriceSetting struct {
-	Model                 string
-	PromptPricePer1M      float64
-	CompletionPricePer1M  float64
-	CachePricePer1M       float64
-	UpdatedAt             time.Time
+	Model                string
+	PromptPricePer1M     float64
+	CompletionPricePer1M float64
+	CachePricePer1M      float64
+	UpdatedAt            time.Time
 }
 
 // APIKeyAlias maps a raw upstream api_key (e.g. "sk-abc...") to a
@@ -121,32 +121,32 @@ type UsageEventsPage struct {
 
 // UsageEventRecord is a redacted, serializable view of a UsageEvent.
 type UsageEventRecord struct {
-	EventKey         string    `json:"event_key"`
-	Timestamp        time.Time `json:"timestamp"`
-	Provider         string    `json:"provider"`
-	Model            string    `json:"model"`
-	APIGroupKey      string    `json:"api_group_key"`
-	APIGroupDisplay  string    `json:"api_group_display"`
-	Source           string    `json:"source"`
-	SourceDisplay    string    `json:"source_display"`
-	AuthIndex        string    `json:"auth_index"`
-	AuthType         string    `json:"auth_type"`
-	Endpoint         string    `json:"endpoint"`
-	RequestID        string    `json:"request_id"`
-	LatencyMs        int64     `json:"latency_ms"`
-	InputTokens      int64     `json:"input_tokens"`
-	OutputTokens     int64     `json:"output_tokens"`
-	ReasoningTokens  int64     `json:"reasoning_tokens"`
-	CachedTokens     int64     `json:"cached_tokens"`
-	TotalTokens      int64     `json:"total_tokens"`
-	Failed           bool      `json:"failed"`
-	Cost             float64   `json:"cost"`
+	EventKey        string    `json:"event_key"`
+	Timestamp       time.Time `json:"timestamp"`
+	Provider        string    `json:"provider"`
+	Model           string    `json:"model"`
+	APIGroupKey     string    `json:"api_group_key"`
+	APIGroupDisplay string    `json:"api_group_display"`
+	Source          string    `json:"source"`
+	SourceDisplay   string    `json:"source_display"`
+	AuthIndex       string    `json:"auth_index"`
+	AuthType        string    `json:"auth_type"`
+	Endpoint        string    `json:"endpoint"`
+	RequestID       string    `json:"request_id"`
+	LatencyMs       int64     `json:"latency_ms"`
+	InputTokens     int64     `json:"input_tokens"`
+	OutputTokens    int64     `json:"output_tokens"`
+	ReasoningTokens int64     `json:"reasoning_tokens"`
+	CachedTokens    int64     `json:"cached_tokens"`
+	TotalTokens     int64     `json:"total_tokens"`
+	Failed          bool      `json:"failed"`
+	Cost            float64   `json:"cost"`
 }
 
 // UsageEventFilterOptions is the facet response for the events listing UI.
 type UsageEventFilterOptions struct {
-	Models       []string              `json:"models"`
-	Sources      []string              `json:"sources"`
+	Models        []string             `json:"models"`
+	Sources       []string             `json:"sources"`
 	APIKeyOptions []APIKeyFilterOption `json:"api_key_options"`
 }
 
@@ -192,11 +192,26 @@ type UsageAggregationRow struct {
 
 // UsageOverview is the response of /usage/overview.
 type UsageOverview struct {
-	Summary      UsageSummary       `json:"summary"`
-	HourlySeries []UsageBucket      `json:"hourly_series"`
-	DailySeries  []UsageBucket      `json:"daily_series"`
-	HealthGrid   [][]HealthCell     `json:"health_grid"`
-	GeneratedAt  time.Time          `json:"generated_at"`
+	Summary      UsageSummary   `json:"summary"`
+	HourlySeries []UsageBucket  `json:"hourly_series"`
+	DailySeries  []UsageBucket  `json:"daily_series"`
+	HealthGrid   [][]HealthCell `json:"health_grid"`
+	GeneratedAt  time.Time      `json:"generated_at"`
+}
+
+// UsageHealthMonth is one month option available for the request matrix.
+type UsageHealthMonth struct {
+	Month string `json:"month"`
+	Total int64  `json:"total"`
+}
+
+// UsageHealthMatrix is the month-sized request matrix payload.
+type UsageHealthMatrix struct {
+	Month  string             `json:"month"`
+	Start  time.Time          `json:"start"`
+	End    time.Time          `json:"end"`
+	Grid   [][]HealthCell     `json:"grid"`
+	Months []UsageHealthMonth `json:"months"`
 }
 
 // UsageSummary is the aggregated totals shown in the overview header.
@@ -228,9 +243,9 @@ type UsageBucket struct {
 
 // HealthCell is one cell of the range-sized health heatmap (15-minute spans by default).
 type HealthCell struct {
-	Bucket  time.Time `json:"bucket"`
-	Total   int64     `json:"total"`
-	Failed  int64     `json:"failed"`
+	Bucket time.Time `json:"bucket"`
+	Total  int64     `json:"total"`
+	Failed int64     `json:"failed"`
 }
 
 // PageSizeAllowed lists the page sizes the API accepts.

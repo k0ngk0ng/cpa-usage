@@ -7,13 +7,17 @@ import { api } from "../api/client";
 import { todayFilter, useFilter } from "../hooks/useFilter";
 import { useRefreshTick } from "../lib/refresh";
 import { formatCost, formatNumber, formatTokens, pct } from "../lib/utils";
-import type { UsageOverview } from "../api/types";
+import type { UsageHealthMatrix, UsageOverview } from "../api/types";
 
 export default function Overview() {
   const { filter, setFilter } = useFilter(todayFilter);
   const [data, setData] = useState<UsageOverview | null>(null);
+  const [health, setHealth] = useState<UsageHealthMatrix | null>(null);
+  const [healthMonth, setHealthMonth] = useState<string>("");
+  const [healthLoading, setHealthLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [healthErr, setHealthErr] = useState<string | null>(null);
   const tick = useRefreshTick();
 
   useEffect(() => {
@@ -35,6 +39,34 @@ export default function Overview() {
       cancelled = true;
     };
   }, [filter, tick]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setHealthLoading(true);
+    setHealthErr(null);
+    api
+      .health(filter, healthMonth || undefined)
+      .then((d) => {
+        if (!cancelled) setHealth(d);
+      })
+      .catch((e: Error) => {
+        if (!cancelled) setHealthErr(e.message);
+      })
+      .finally(() => {
+        if (!cancelled) setHealthLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    filter.models,
+    filter.sources,
+    filter.apiKey,
+    filter.authIndex,
+    filter.result,
+    healthMonth,
+    tick,
+  ]);
 
   const summary = data?.summary;
   const useDaily = filter.range === "7d" || filter.range === "30d" || filter.range === "all";
@@ -105,7 +137,24 @@ export default function Overview() {
 
         <div>
           <h2 className="text-sm uppercase tracking-wider text-muted mb-2">Request matrix</h2>
-          {data && <HealthGrid grid={data.health_grid || []} filter={filter} />}
+          {healthErr && (
+            <div className="bg-danger/10 border border-danger/30 text-danger rounded-lg p-3 text-sm mb-4">
+              {healthErr}
+            </div>
+          )}
+          {healthLoading && !health ? (
+            <div className="bg-panel border border-border rounded-lg p-8 text-center text-muted text-sm">
+              Loading…
+            </div>
+          ) : (
+            <HealthGrid
+              grid={health?.grid || []}
+              filter={filter}
+              month={health?.month || healthMonth}
+              months={health?.months || []}
+              onMonthChange={setHealthMonth}
+            />
+          )}
         </div>
       </div>
     </div>

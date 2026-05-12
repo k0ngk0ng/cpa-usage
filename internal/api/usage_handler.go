@@ -57,6 +57,22 @@ func usageOverviewHandler(deps UsageDeps) gin.HandlerFunc {
 	}
 }
 
+func usageHealthHandler(deps UsageDeps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		f, err := parseFilterFromQuery(c)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		out, err := deps.Service.Health(c.Request.Context(), f, c.Query("month"), time.Now().In(time.Local))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, out)
+	}
+}
+
 func usageAnalysisHandler(deps UsageDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		f, err := parseFilterFromQuery(c)

@@ -60,6 +60,7 @@ func New(cfg RouterConfig) *gin.Engine {
 				protected.POST("/sync", syncHandler(cfg.Meta))
 
 				protected.GET("/usage/overview", usageOverviewHandler(cfg.Usage))
+				protected.GET("/usage/health", usageHealthHandler(cfg.Usage))
 				protected.GET("/usage/analysis", usageAnalysisHandler(cfg.Usage))
 				protected.GET("/usage/events", usageEventsHandler(cfg.Usage))
 				protected.GET("/usage/events/filters", usageEventFiltersHandler(cfg.Usage))

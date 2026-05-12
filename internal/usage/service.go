@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -131,6 +132,40 @@ func ParseFilter(rangeKey string, startStr, endStr string, models, sources, apiK
 func (s *Service) Overview(ctx context.Context, f Filter) (*storage.UsageOverview, error) {
 	prices := s.pricing.Snapshot()
 	return s.store.BuildUsageOverview(ctx, f.toStorage(), prices)
+}
+
+// Health returns the month-sized request matrix and the available month list.
+func (s *Service) Health(ctx context.Context, f Filter, monthKey string, now time.Time) (*storage.UsageHealthMatrix, error) {
+	start, err := parseMonth(monthKey, now)
+	if err != nil {
+		return nil, err
+	}
+	end := start.AddDate(0, 1, 0)
+	sf := f.toStorage()
+	sf.Range = ""
+	sf.Start = time.Time{}
+	sf.End = time.Time{}
+
+	months, err := s.store.ListUsageEventMonths(ctx, sf)
+	if err != nil {
+		return nil, err
+	}
+	month := start.Format("2006-01")
+	localNow := now.In(time.Local)
+	currentMonth := time.Date(localNow.Year(), localNow.Month(), 1, 0, 0, 0, 0, time.Local).Format("2006-01")
+	months = ensureMonthOption(ensureMonthOption(months, month), currentMonth)
+
+	grid, err := s.store.BuildUsageHealthGrid(ctx, sf, start, end)
+	if err != nil {
+		return nil, err
+	}
+	return &storage.UsageHealthMatrix{
+		Month:  month,
+		Start:  start,
+		End:    end,
+		Grid:   grid,
+		Months: months,
+	}, nil
 }
 
 // Events returns paginated raw events with display-name decoration applied.
@@ -321,6 +356,30 @@ func parseTime(in string) (time.Time, error) {
 		}
 	}
 	return time.Time{}, fmt.Errorf("unrecognized time %q", in)
+}
+
+func parseMonth(in string, now time.Time) (time.Time, error) {
+	in = strings.TrimSpace(in)
+	if in == "" {
+		local := now.In(time.Local)
+		return time.Date(local.Year(), local.Month(), 1, 0, 0, 0, 0, time.Local), nil
+	}
+	t, err := time.ParseInLocation("2006-01", in, time.Local)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse month: %w", err)
+	}
+	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.Local), nil
+}
+
+func ensureMonthOption(months []storage.UsageHealthMonth, month string) []storage.UsageHealthMonth {
+	for _, m := range months {
+		if m.Month == month {
+			return months
+		}
+	}
+	out := append([]storage.UsageHealthMonth{{Month: month}}, months...)
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Month > out[j].Month })
+	return out
 }
 
 func pageSizeAllowed(size int) bool {

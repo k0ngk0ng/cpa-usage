@@ -17,6 +17,7 @@ import type {
   UsageCredentialStat,
   UsageEventFilterOptions,
   UsageEventsPage,
+  UsageHealthMatrix,
   UsageOverview,
   VersionInfo,
 } from "./types";
@@ -96,6 +97,20 @@ function buildQuery(filter: Filter, extra: Record<string, string | number | unde
   return qs ? `?${qs}` : "";
 }
 
+function buildFacetQuery(filter: Filter, extra: Record<string, string | number | undefined> = {}): string {
+  const sp = new URLSearchParams();
+  for (const m of filter.models) sp.append("model", m);
+  for (const s of filter.sources) sp.append("source", s);
+  for (const k of filter.apiKey) sp.append("api_key", k);
+  if (filter.authIndex) sp.set("auth_index", filter.authIndex);
+  if (filter.result) sp.set("result", filter.result);
+  for (const [k, v] of Object.entries(extra)) {
+    if (v !== undefined && v !== "") sp.set(k, String(v));
+  }
+  const qs = sp.toString();
+  return qs ? `?${qs}` : "";
+}
+
 export const api = {
   async session(): Promise<Session> {
     return request<Session>("/auth/session");
@@ -122,6 +137,11 @@ export const api = {
 
   async overview(filter: Filter): Promise<UsageOverview> {
     return request<UsageOverview>("/usage/overview" + buildQuery(filter));
+  },
+  async health(filter: Filter, month?: string): Promise<UsageHealthMatrix> {
+    return request<UsageHealthMatrix>(
+      "/usage/health" + buildFacetQuery(filter, { month }),
+    );
   },
   async analysis(filter: Filter): Promise<UsageAnalysis> {
     return request<UsageAnalysis>("/usage/analysis" + buildQuery(filter));

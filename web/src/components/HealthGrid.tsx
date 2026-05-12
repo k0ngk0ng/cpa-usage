@@ -1,12 +1,15 @@
 import { Link } from "react-router-dom";
 import clsx from "clsx";
-import type { Filter, HealthCell } from "../api/types";
+import type { Filter, HealthCell, UsageHealthMonth } from "../api/types";
 import { formatTimestamp } from "../lib/utils";
 
 interface Props {
   // Outer = days (chronological), inner = 96 cells per day (15-minute spans).
   grid: HealthCell[][];
   filter?: Filter;
+  month?: string;
+  months?: UsageHealthMonth[];
+  onMonthChange?: (month: string) => void;
 }
 
 function cellTone(cell: HealthCell, maxTotal: number): string {
@@ -20,7 +23,7 @@ function cellTone(cell: HealthCell, maxTotal: number): string {
   return "bg-success/40";
 }
 
-export default function HealthGrid({ grid, filter }: Props) {
+export default function HealthGrid({ grid, filter, month, months = [], onMonthChange }: Props) {
   if (!grid || grid.length === 0) {
     return (
       <div className="bg-panel border border-border rounded-lg p-6 text-muted text-sm text-center">
@@ -34,40 +37,59 @@ export default function HealthGrid({ grid, filter }: Props) {
     hours: hourlyCells(day),
   }));
   const maxTotal = Math.max(0, ...days.flatMap((day) => day.hours.map((cell) => cell.total)));
+  const monthOptions = monthSelectOptions(month, months);
 
   return (
     <div className="bg-panel border border-border rounded-lg p-4">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
         <h3 className="text-sm font-medium">Request matrix</h3>
-        <Legend />
+        <div className="flex flex-wrap items-center gap-3">
+          <Legend />
+          {onMonthChange && (
+            <select
+              value={month || ""}
+              onChange={(e) => onMonthChange(e.target.value)}
+              className="bg-panel2 border border-border rounded px-2 py-1 text-xs text-ink"
+              title="Request matrix month"
+            >
+              {monthOptions.map((m) => (
+                <option key={m.month} value={m.month}>
+                  {formatMonthLabel(m.month)}
+                  {m.total ? ` (${m.total.toLocaleString()})` : ""}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
       </div>
       <div className="overflow-x-auto pb-1">
         <div
           className="inline-grid items-center gap-[2px]"
-          style={{ gridTemplateColumns: "3.75rem repeat(24, 0.875rem)" }}
+          style={{ gridTemplateColumns: `3.75rem repeat(${days.length}, 1.25rem)` }}
         >
-          <div className="h-3" />
-          {Array.from({ length: 24 }, (_, hour) => (
-            <div key={hour} className="h-3 text-center text-[9px] leading-3 text-muted tabular-nums">
-              {hourTickLabel(hour)}
+          <div className="h-6" />
+          {days.map((day, di) => (
+            <div key={di} className="h-6 text-center text-[9px] leading-6 text-muted tabular-nums">
+              <span title={day.title}>{dayOfMonthLabel(day)}</span>
             </div>
           ))}
-          {days.map((day, di) => (
-            <div key={`${di}-row`} className="contents">
-              <div className="h-3 pr-2 text-right text-[9px] leading-3 text-muted tabular-nums">
-                <span title={day.title}>{day.label}</span>
+          {Array.from({ length: 24 }, (_, hour) => (
+            <div key={hour} className="contents">
+              <div className="h-5 pr-2 text-right text-[9px] leading-5 text-muted tabular-nums">
+                {hourTickLabel(hour)}
               </div>
-              {day.hours.map((cell, hour) => {
+              {days.map((day, di) => {
+                const cell = day.hours[hour];
                 const title = `${day.title} ${hourLabel(hour)} — ${cell.total} requests, ${cell.failed} failed${
                   cell.bucket ? ` (${formatTimestamp(cell.bucket)})` : ""
                 }`;
                 return (
-                  <div key={`${di}-${hour}`} className="flex h-3 items-center justify-center">
+                  <div key={`${di}-${hour}`} className="flex h-5 items-center justify-center">
                     {cell.total > 0 && cell.bucket ? (
                       <Link
                         to={{ pathname: "/events", search: eventSearch(cell, filter) }}
                         className={clsx(
-                          "block h-3 w-3 rounded-[2px] transition-shadow hover:ring-1 hover:ring-accent focus:outline-none focus:ring-1 focus:ring-accent",
+                          "block h-5 w-5 rounded-[3px] transition-shadow hover:ring-1 hover:ring-accent focus:outline-none focus:ring-1 focus:ring-accent",
                           cellTone(cell, maxTotal),
                         )}
                         title={title}
@@ -75,7 +97,7 @@ export default function HealthGrid({ grid, filter }: Props) {
                       />
                     ) : (
                       <div
-                        className={clsx("h-3 w-3 rounded-[2px]", cellTone(cell, maxTotal))}
+                        className={clsx("h-5 w-5 rounded-[3px]", cellTone(cell, maxTotal))}
                         title={title}
                       />
                     )}
@@ -88,6 +110,19 @@ export default function HealthGrid({ grid, filter }: Props) {
       </div>
     </div>
   );
+}
+
+function monthSelectOptions(selected: string | undefined, months: UsageHealthMonth[]): UsageHealthMonth[] {
+  if (!selected) return months;
+  if (months.some((m) => m.month === selected)) return months;
+  return [{ month: selected, total: 0 }, ...months].sort((a, b) => b.month.localeCompare(a.month));
+}
+
+function formatMonthLabel(month: string): string {
+  const [year, rawMonth] = month.split("-");
+  const index = Number(rawMonth) - 1;
+  if (!year || !Number.isInteger(index) || index < 0 || index > 11) return month;
+  return `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][index]} ${year}`;
 }
 
 function eventSearch(cell: HealthCell, filter?: Filter): string {
@@ -141,6 +176,14 @@ function dayTitle(day: HealthCell[]): string {
   return `${weekdayLabel(d)} ${d.getMonth() + 1}/${d.getDate()}`;
 }
 
+function dayOfMonthLabel(day: { label: string; title: string; hours: HealthCell[] }): string {
+  const first = day.hours[0]?.bucket;
+  if (!first) return day.label;
+  const d = new Date(first);
+  if (Number.isNaN(d.getTime())) return day.label;
+  return String(d.getDate());
+}
+
 function weekdayLabel(d: Date): string {
   return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()];
 }
@@ -150,7 +193,7 @@ function hourLabel(hour: number): string {
 }
 
 function hourTickLabel(hour: number): string {
-  return hour % 6 === 0 ? String(hour).padStart(2, "0") : "";
+  return hour % 3 === 0 ? `${String(hour).padStart(2, "0")}:00` : "";
 }
 
 function Legend() {
