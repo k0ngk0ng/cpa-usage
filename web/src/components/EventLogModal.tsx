@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -27,12 +27,26 @@ interface Tab {
   render: () => React.ReactNode;
 }
 
+interface ModalRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+type ModalInteraction =
+  | { kind: "drag"; startX: number; startY: number; startRect: ModalRect }
+  | { kind: "resize"; startX: number; startY: number; startRect: ModalRect };
+
 export default function EventLogModal({ event, onClose }: Props) {
   const [loading, setLoading] = useState(true);
   const [entry, setEntry] = useState<EventLogEntry | null>(null);
   const [missing, setMissing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>("info");
+  const [rect, setRect] = useState<ModalRect>(() => initialModalRect());
+  const interactionRef = useRef<ModalInteraction | null>(null);
+  const bodyStyleRef = useRef<{ cursor: string; userSelect: string } | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -41,6 +55,66 @@ export default function EventLogModal({ event, onClose }: Props) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  const beginPointerInteraction = useCallback((cursor: string) => {
+    if (typeof document === "undefined" || bodyStyleRef.current) return;
+    bodyStyleRef.current = {
+      cursor: document.body.style.cursor,
+      userSelect: document.body.style.userSelect,
+    };
+    document.body.style.cursor = cursor;
+    document.body.style.userSelect = "none";
+  }, []);
+
+  const endPointerInteraction = useCallback(() => {
+    if (typeof document === "undefined" || !bodyStyleRef.current) return;
+    document.body.style.cursor = bodyStyleRef.current.cursor;
+    document.body.style.userSelect = bodyStyleRef.current.userSelect;
+    bodyStyleRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    const onPointerMove = (e: PointerEvent) => {
+      const interaction = interactionRef.current;
+      if (!interaction) return;
+      const dx = e.clientX - interaction.startX;
+      const dy = e.clientY - interaction.startY;
+      if (interaction.kind === "drag") {
+        setRect(
+          constrainModalRect({
+            ...interaction.startRect,
+            x: interaction.startRect.x + dx,
+            y: interaction.startRect.y + dy,
+          }),
+        );
+      } else {
+        setRect(
+          constrainModalRect({
+            ...interaction.startRect,
+            width: interaction.startRect.width + dx,
+            height: interaction.startRect.height + dy,
+          }),
+        );
+      }
+    };
+    const onPointerUp = () => {
+      interactionRef.current = null;
+      endPointerInteraction();
+    };
+    const onResize = () => setRect((prev) => constrainModalRect(prev));
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+      window.removeEventListener("resize", onResize);
+      endPointerInteraction();
+    };
+  }, [endPointerInteraction]);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,17 +155,57 @@ export default function EventLogModal({ event, onClose }: Props) {
   }, [tabs, activeTab]);
 
   const downloadHref = api.eventLogRawURL(event.request_id);
+  const startDrag = (e: React.PointerEvent<HTMLElement>) => {
+    if (e.button !== 0 || isInteractiveTarget(e.target)) return;
+    e.preventDefault();
+    interactionRef.current = {
+      kind: "drag",
+      startX: e.clientX,
+      startY: e.clientY,
+      startRect: rect,
+    };
+    beginPointerInteraction("move");
+  };
+  const startResize = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    interactionRef.current = {
+      kind: "resize",
+      startX: e.clientX,
+      startY: e.clientY,
+      startRect: rect,
+    };
+    beginPointerInteraction("nwse-resize");
+  };
+  const resetRect = () => setRect(initialModalRect());
+  const resetRectFromHeader = (e: React.MouseEvent<HTMLElement>) => {
+    if (!isInteractiveTarget(e.target)) resetRect();
+  };
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-50 bg-black/60"
       onClick={onClose}
     >
       <div
-        className="bg-panel border border-border rounded-lg max-w-5xl w-full h-[90vh] flex flex-col overflow-hidden"
+        className="absolute bg-panel border border-border rounded-lg flex flex-col overflow-hidden shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        style={{
+          left: rect.x,
+          top: rect.y,
+          width: rect.width,
+          height: rect.height,
+        }}
         onClick={(e) => e.stopPropagation()}
       >
-        <header className="flex items-center justify-between px-4 py-3 border-b border-border">
+        <header
+          className="flex items-center justify-between px-4 py-3 border-b border-border cursor-move select-none"
+          onPointerDown={startDrag}
+          onDoubleClick={resetRectFromHeader}
+          title="Drag to move. Double-click to reset."
+        >
           <div className="flex items-baseline gap-3 min-w-0">
             <h2 className="text-sm font-semibold">Request log</h2>
             <span className="font-mono text-xs text-muted truncate">
@@ -106,7 +220,7 @@ export default function EventLogModal({ event, onClose }: Props) {
               href={downloadHref}
               download
               className={clsx(
-                "text-xs border border-border rounded px-2 py-1 hover:text-ink",
+                "text-xs border border-border rounded px-2 py-1 hover:text-ink cursor-pointer",
                 (loading || missing) && "opacity-40 pointer-events-none",
               )}
               title="Download raw log file"
@@ -115,7 +229,7 @@ export default function EventLogModal({ event, onClose }: Props) {
             </a>
             <button
               onClick={onClose}
-              className="text-muted hover:text-ink text-lg leading-none px-2"
+              className="text-muted hover:text-ink text-lg leading-none px-2 cursor-pointer"
               aria-label="Close"
             >
               ×
@@ -172,9 +286,62 @@ export default function EventLogModal({ event, onClose }: Props) {
             </div>
           </>
         )}
+        <button
+          type="button"
+          className="absolute bottom-0 right-0 h-5 w-5 cursor-nwse-resize text-muted hover:text-ink focus:outline-none focus:ring-1 focus:ring-accent"
+          aria-label="Resize dialog"
+          onPointerDown={startResize}
+          onDoubleClick={resetRect}
+        >
+          <span className="absolute bottom-1 right-1 h-3 w-3 border-b-2 border-r-2 border-current" />
+        </button>
       </div>
     </div>
   );
+}
+
+const MODAL_PADDING = 16;
+const MODAL_MIN_WIDTH = 480;
+const MODAL_MIN_HEIGHT = 320;
+
+function initialModalRect(): ModalRect {
+  if (typeof window === "undefined") {
+    return { x: MODAL_PADDING, y: MODAL_PADDING, width: 1024, height: 720 };
+  }
+  const maxWidth = Math.max(320, window.innerWidth - MODAL_PADDING * 2);
+  const maxHeight = Math.max(240, window.innerHeight - MODAL_PADDING * 2);
+  const width = Math.min(maxWidth, Math.max(Math.min(MODAL_MIN_WIDTH, maxWidth), 1024));
+  const height = Math.min(maxHeight, Math.max(Math.min(MODAL_MIN_HEIGHT, maxHeight), Math.round(window.innerHeight * 0.9)));
+  return {
+    x: Math.round((window.innerWidth - width) / 2),
+    y: Math.round((window.innerHeight - height) / 2),
+    width,
+    height,
+  };
+}
+
+function constrainModalRect(rect: ModalRect): ModalRect {
+  if (typeof window === "undefined") return rect;
+  const maxWidth = Math.max(320, window.innerWidth - MODAL_PADDING * 2);
+  const maxHeight = Math.max(240, window.innerHeight - MODAL_PADDING * 2);
+  const minWidth = Math.min(MODAL_MIN_WIDTH, maxWidth);
+  const minHeight = Math.min(MODAL_MIN_HEIGHT, maxHeight);
+  const width = clamp(rect.width, minWidth, maxWidth);
+  const height = clamp(rect.height, minHeight, maxHeight);
+  return {
+    width,
+    height,
+    x: clamp(rect.x, MODAL_PADDING, Math.max(MODAL_PADDING, window.innerWidth - width - MODAL_PADDING)),
+    y: clamp(rect.y, MODAL_PADDING, Math.max(MODAL_PADDING, window.innerHeight - height - MODAL_PADDING)),
+  };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function isInteractiveTarget(target: EventTarget): boolean {
+  return target instanceof Element && !!target.closest("button, a, input, textarea, select, [data-no-drag]");
 }
 
 function buildTabs(entry: EventLogEntry | null): Tab[] {

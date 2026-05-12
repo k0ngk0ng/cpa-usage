@@ -102,7 +102,7 @@ export default function Layout({ children, authRequired, onLogout }: Props) {
           </div>
         </div>
       </header>
-      <main className="flex-1">
+      <main className="flex-1 pb-10">
         <div className="max-w-[1400px] mx-auto px-6 py-6">{children}</div>
       </main>
       <Footer version={version} />
@@ -116,7 +116,7 @@ function Footer({ version }: { version: VersionInfo | null }) {
   const ourLabel = formatBuild(ours);
   const cpaLabel = formatBuild(cpa);
   return (
-    <footer className="border-t border-border bg-panel">
+    <footer className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-panel/95 backdrop-blur">
       <div className="max-w-[1400px] mx-auto px-6 py-2 flex items-center gap-4 text-[11px] text-muted">
         <span>
           cpa-usage <span className="font-mono text-ink">{ourLabel || "dev"}</span>
