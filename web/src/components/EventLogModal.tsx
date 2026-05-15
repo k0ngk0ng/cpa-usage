@@ -13,7 +13,7 @@ import {
   isSafeDataImageURL,
   streamToMarkdown,
 } from "../lib/protocol";
-import type { Turn } from "../lib/protocol";
+import type { StreamExtraction, Turn } from "../lib/protocol";
 
 interface Props {
   event: UsageEventRecord;
@@ -607,7 +607,7 @@ function BodyView({ raw, kind }: { raw: string; kind: "request" | "response" }) 
             text: streamToMarkdown(stream),
             encrypted: stream.encrypted,
             hiddenType: stream.hiddenType,
-            raw,
+            raw: responseRawValue(stream),
           },
 	        ],
 	        label: "stream",
@@ -624,7 +624,7 @@ function BodyView({ raw, kind }: { raw: string; kind: "request" | "response" }) 
             text: streamToMarkdown(json),
             encrypted: json.encrypted,
             hiddenType: json.hiddenType,
-            raw,
+            raw: responseRawValue(json),
           },
 	        ],
 	        label: "json",
@@ -774,7 +774,7 @@ function responseToTurn(raw: string): Turn | null {
       text: streamToMarkdown(stream),
       encrypted: stream.encrypted,
       hiddenType: stream.hiddenType,
-      raw,
+      raw: responseRawValue(stream),
     };
   }
   const json = extractResponseJSON(raw);
@@ -784,10 +784,30 @@ function responseToTurn(raw: string): Turn | null {
       text: streamToMarkdown(json),
       encrypted: json.encrypted,
       hiddenType: json.hiddenType,
-      raw,
+      raw: responseRawValue(json),
     };
   }
   return { role: "assistant", text: fenceMarkdown(raw.trim()), raw };
+}
+
+function responseRawValue(extraction: StreamExtraction): unknown {
+  return extraction.raw ?? mergedResponseRaw(extraction);
+}
+
+function mergedResponseRaw(extraction: StreamExtraction): Record<string, unknown> {
+  const content = extraction.content.trim();
+  const thinking = extraction.thinking.trim();
+  const merged: Record<string, unknown> = {
+    role: "assistant",
+    content: content || "",
+  };
+
+  if (thinking) merged.thinking = thinking;
+  if (extraction.hiddenType) merged.hidden_type = extraction.hiddenType;
+  if (extraction.encrypted) merged.encrypted = true;
+  if (extraction.errors.length) merged.errors = extraction.errors;
+
+  return merged;
 }
 
 function finalResponseBody(entry: EventLogEntry): string {
@@ -893,7 +913,7 @@ function ChatView({ turns }: { turns: Turn[] }) {
                         className={clsx("chat-toggle", rawExpanded && "chat-toggle-active")}
                         onClick={() => toggleRaw(index)}
                         aria-pressed={rawExpanded}
-                        title="Show original JSON"
+                        title="Show JSON"
                       >
                         {rawExpanded ? "Hide" : "JSON"}
                       </button>
@@ -936,6 +956,8 @@ function turnRawText(turn: Turn): string | null {
 
 function rawValueText(value: unknown): string {
   if (typeof value === "string") {
+    const stream = extractResponseStream(value);
+    if (stream.detected) return rawValueText(responseRawValue(stream));
     const pretty = tryPrettyJson(value);
     return pretty || JSON.stringify(value);
   }

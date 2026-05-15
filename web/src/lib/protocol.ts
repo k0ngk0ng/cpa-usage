@@ -588,6 +588,7 @@ export interface StreamExtraction {
   encrypted?: boolean;
   hiddenType?: string;
   errors: string[];
+  raw?: unknown;
 }
 
 interface AnthropicBlock {
@@ -604,6 +605,8 @@ interface AnthropicBlock {
 export function extractResponseStream(text: string): StreamExtraction {
   const out: StreamExtraction = { detected: false, content: "", thinking: "", errors: [] };
   if (!text) return out;
+  let latestResponse: Record<string, unknown> | null = null;
+  let completedResponse: Record<string, unknown> | null = null;
 
   // Anthropic content blocks are reassembled by index — tool_use blocks
   // arrive as a stream of input_json_delta.partial_json chunks that have to
@@ -632,8 +635,9 @@ export function extractResponseStream(text: string): StreamExtraction {
   // block. Walk line by line and only act on `data:` rows.
   const lines = text.split(/\r?\n/);
   for (const line of lines) {
-    if (!line.startsWith("data:")) continue;
-    const payload = line.slice(5).trim();
+    const match = /^\s*data:\s?(.*)$/.exec(line);
+    if (!match) continue;
+    const payload = match[1].trim();
     if (!payload || payload === "[DONE]") continue;
     out.detected = true;
     let obj: unknown;
@@ -644,6 +648,19 @@ export function extractResponseStream(text: string): StreamExtraction {
     }
     if (!obj || typeof obj !== "object") continue;
     const o = obj as Record<string, unknown>;
+    const response = objectValue(o.response);
+    if (response) {
+      latestResponse = response;
+      const type = stringValue(o.type);
+      if (
+        type === "response.completed" ||
+        type === "response.failed" ||
+        type === "response.incomplete" ||
+        type === "response.cancelled"
+      ) {
+        completedResponse = response;
+      }
+    }
 
     // Anthropic
     if (o.type === "content_block_start") {
@@ -860,7 +877,67 @@ export function extractResponseStream(text: string): StreamExtraction {
     out.content += sep + toolUseMarkdown(c.name, c.callID, input, language);
   }
 
+  if (out.detected) {
+    out.raw = responseStreamRaw(completedResponse ?? latestResponse, out);
+  }
+
   return out;
+}
+
+function responseStreamRaw(
+  response: Record<string, unknown> | null,
+  extraction: StreamExtraction,
+): Record<string, unknown> {
+  if (response) {
+    const output = response.output;
+    if (Array.isArray(output) && output.length > 0) return response;
+    return {
+      ...response,
+      output: synthesizedResponseOutput(extraction),
+    };
+  }
+  return synthesizedAssistantResponse(extraction);
+}
+
+function synthesizedResponseOutput(extraction: StreamExtraction): unknown[] {
+  const output: unknown[] = [];
+  const thinking = extraction.thinking.trim();
+  const content = extraction.content.trim();
+
+  if (thinking || extraction.hiddenType) {
+    output.push({
+      type: "reasoning",
+      ...(thinking ? { summary: [{ type: "summary_text", text: thinking }] } : {}),
+      ...(extraction.hiddenType ? { hidden_type: extraction.hiddenType } : {}),
+      ...(extraction.encrypted ? { encrypted: true } : {}),
+    });
+  }
+
+  output.push({
+    type: "message",
+    role: "assistant",
+    content: content ? [{ type: "output_text", text: content }] : [],
+  });
+
+  if (extraction.errors.length) {
+    output.push({ type: "errors", errors: extraction.errors });
+  }
+
+  return output;
+}
+
+function synthesizedAssistantResponse(extraction: StreamExtraction): Record<string, unknown> {
+  const content = extraction.content.trim();
+  const thinking = extraction.thinking.trim();
+  return {
+    role: "assistant",
+    content,
+    output: synthesizedResponseOutput(extraction),
+    ...(thinking ? { thinking } : {}),
+    ...(extraction.hiddenType ? { hidden_type: extraction.hiddenType } : {}),
+    ...(extraction.encrypted ? { encrypted: true } : {}),
+    ...(extraction.errors.length ? { errors: extraction.errors } : {}),
+  };
 }
 
 // formatPartialJSON tries to pretty-print the accumulated input_json_delta.
@@ -888,7 +965,7 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
   }
   if (!obj || typeof obj !== "object") return null;
   const o = obj as Record<string, unknown>;
-  const out: StreamExtraction = { detected: false, content: "", thinking: "", errors: [] };
+  const out: StreamExtraction = { detected: false, content: "", thinking: "", errors: [], raw: obj };
 
   // Anthropic non-streaming: { content: [{type:'text', text:'...'}, {type:'thinking', thinking:'...'}, {type:'tool_use', name, input}] }
   if (Array.isArray(o.content)) {
