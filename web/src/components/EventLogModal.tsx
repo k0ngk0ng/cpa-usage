@@ -80,16 +80,14 @@ export default function EventLogModal({ event, onClose }: Props) {
       const dx = e.clientX - interaction.startX;
       const dy = e.clientY - interaction.startY;
       if (interaction.kind === "drag") {
-        setRect(
-          constrainModalRect({
-            ...interaction.startRect,
-            x: interaction.startRect.x + dx,
-            y: interaction.startRect.y + dy,
-          }),
-        );
+        setRect({
+          ...interaction.startRect,
+          x: interaction.startRect.x + dx,
+          y: interaction.startRect.y + dy,
+        });
       } else {
         setRect(
-          constrainModalRect({
+          applyModalMinSize({
             ...interaction.startRect,
             width: interaction.startRect.width + dx,
             height: interaction.startRect.height + dy,
@@ -101,17 +99,14 @@ export default function EventLogModal({ event, onClose }: Props) {
       interactionRef.current = null;
       endPointerInteraction();
     };
-    const onResize = () => setRect((prev) => constrainModalRect(prev));
 
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
     window.addEventListener("pointercancel", onPointerUp);
-    window.addEventListener("resize", onResize);
     return () => {
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("pointercancel", onPointerUp);
-      window.removeEventListener("resize", onResize);
       endPointerInteraction();
     };
   }, [endPointerInteraction]);
@@ -320,24 +315,23 @@ function initialModalRect(): ModalRect {
   };
 }
 
-function constrainModalRect(rect: ModalRect): ModalRect {
-  if (typeof window === "undefined") return rect;
-  const maxWidth = Math.max(320, window.innerWidth - MODAL_PADDING * 2);
-  const maxHeight = Math.max(240, window.innerHeight - MODAL_PADDING * 2);
-  const minWidth = Math.min(MODAL_MIN_WIDTH, maxWidth);
-  const minHeight = Math.min(MODAL_MIN_HEIGHT, maxHeight);
-  const width = clamp(rect.width, minWidth, maxWidth);
-  const height = clamp(rect.height, minHeight, maxHeight);
+function applyModalMinSize(rect: ModalRect): ModalRect {
+  const { minWidth, minHeight } = modalMinSize();
   return {
-    width,
-    height,
-    x: clamp(rect.x, MODAL_PADDING, Math.max(MODAL_PADDING, window.innerWidth - width - MODAL_PADDING)),
-    y: clamp(rect.y, MODAL_PADDING, Math.max(MODAL_PADDING, window.innerHeight - height - MODAL_PADDING)),
+    ...rect,
+    width: Math.max(rect.width, minWidth),
+    height: Math.max(rect.height, minHeight),
   };
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
+function modalMinSize(): { minWidth: number; minHeight: number } {
+  if (typeof window === "undefined") {
+    return { minWidth: MODAL_MIN_WIDTH, minHeight: MODAL_MIN_HEIGHT };
+  }
+  return {
+    minWidth: Math.min(MODAL_MIN_WIDTH, Math.max(320, window.innerWidth - MODAL_PADDING * 2)),
+    minHeight: Math.min(MODAL_MIN_HEIGHT, Math.max(240, window.innerHeight - MODAL_PADDING * 2)),
+  };
 }
 
 function isInteractiveTarget(target: EventTarget): boolean {
