@@ -19,6 +19,7 @@ export interface Turn {
   attachments?: string[];
   encrypted?: boolean;
   hiddenType?: string;
+  raw?: unknown;
 }
 
 export function extractRequestTurns(rawJson: string): Turn[] | null {
@@ -33,11 +34,11 @@ export function extractRequestTurns(rawJson: string): Turn[] | null {
 
   const turns: Turn[] = [];
 
-  appendInstructionTurn(turns, "system", o.system);
-  appendInstructionTurn(turns, "system", o.instructions);
-  appendInstructionTurn(turns, "system", o.systemInstruction);
-  appendInstructionTurn(turns, "system", o.system_instruction);
-  appendInstructionTurn(turns, "developer", o.developer);
+  appendInstructionTurn(turns, "system", "system", o.system);
+  appendInstructionTurn(turns, "system", "instructions", o.instructions);
+  appendInstructionTurn(turns, "system", "systemInstruction", o.systemInstruction);
+  appendInstructionTurn(turns, "system", "system_instruction", o.system_instruction);
+  appendInstructionTurn(turns, "developer", "developer", o.developer);
 
   if (Array.isArray(o.messages)) {
     for (const m of o.messages) turns.push(messageToTurn(m));
@@ -68,9 +69,9 @@ export function extractRequestToolDeclarations(rawJson: string): Turn | null {
   return toolDeclarationTurn(o.tools);
 }
 
-function appendInstructionTurn(turns: Turn[], role: string, raw: unknown) {
+function appendInstructionTurn(turns: Turn[], role: string, key: string, raw: unknown) {
   const text = instructionToText(raw);
-  if (text.trim()) turns.push({ role, text });
+  if (text.trim()) turns.push({ role, text, raw: { [key]: raw } });
 }
 
 function instructionToText(raw: unknown): string {
@@ -150,9 +151,9 @@ function messageToTurn(raw: unknown): Turn {
   }
   if (!text && attachments.length === 0) {
     const fallback = messageFallbackMarkdown(m, type || "message");
-    if (fallback) return { role, text: fallback };
+    if (fallback) return { role, text: fallback, raw };
   }
-  return { role, text, attachments: attachments.length ? attachments : undefined };
+  return { role, text, attachments: attachments.length ? attachments : undefined, raw };
 }
 
 function isImagePartType(type: string): boolean {
@@ -203,6 +204,7 @@ function toolDeclarationTurn(raw: unknown): Turn | null {
   return {
     role: "tool",
     text: toolDeclarationsMarkdown(raw),
+    raw,
   };
 }
 
@@ -404,6 +406,7 @@ function responsesInputToTurn(raw: unknown): Turn {
     return {
       role: "assistant",
       text: toolUseMarkdown(name, m.call_id, json, "json"),
+      raw: m,
     };
   }
   if (type === "custom_tool_call") {
@@ -412,6 +415,7 @@ function responsesInputToTurn(raw: unknown): Turn {
     return {
       role: "assistant",
       text: toolUseMarkdown(name, m.call_id, input, customToolLanguage(name, input)),
+      raw: m,
     };
   }
   if (type === "function_call_output" || type === "custom_tool_call_output") {
@@ -419,6 +423,7 @@ function responsesInputToTurn(raw: unknown): Turn {
     return {
       role: "tool",
       text: toolResultMarkdown(m.call_id, out),
+      raw: m,
     };
   }
   if (type === "reasoning") {
@@ -430,17 +435,18 @@ function responsesInputToTurn(raw: unknown): Turn {
       : "";
     if (summary) {
       const quoted = summary.split("\n").map((l) => "> " + l).join("\n");
-      return { role: "assistant", text: "_thinking_\n" + quoted };
+      return { role: "assistant", text: "_thinking_\n" + quoted, raw: m };
     }
     if (hasEncryptedReasoning(m)) {
-      return { role: "assistant", text: hiddenTypeText(type), encrypted: true, hiddenType: type };
+      return { role: "assistant", text: hiddenTypeText(type), encrypted: true, hiddenType: type, raw: m };
     }
-    return { role: "assistant", text: "", attachments: ["reasoning"] };
+    return { role: "assistant", text: "", attachments: ["reasoning"], raw: m };
   }
   if (type === "web_search_call") {
     return {
       role: "assistant",
       text: webSearchCallMarkdown(m),
+      raw: m,
     };
   }
   return typedItemToTurn(m, type);
@@ -450,6 +456,7 @@ function typedItemToTurn(item: Record<string, unknown>, type: string): Turn {
   return {
     role: type,
     text: typedItemMarkdown(item, type),
+    raw: item,
   };
 }
 
@@ -570,7 +577,7 @@ function geminiContentToTurn(raw: unknown): Turn {
     else if (o.functionResponse) attachments.push("function_response");
     else attachments.push(Object.keys(o).join(",") || "part");
   }
-  return { role, text, attachments: attachments.length ? attachments : undefined };
+  return { role, text, attachments: attachments.length ? attachments : undefined, raw };
 }
 
 

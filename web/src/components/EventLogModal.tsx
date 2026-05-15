@@ -607,6 +607,7 @@ function BodyView({ raw, kind }: { raw: string; kind: "request" | "response" }) 
             text: streamToMarkdown(stream),
             encrypted: stream.encrypted,
             hiddenType: stream.hiddenType,
+            raw,
           },
 	        ],
 	        label: "stream",
@@ -623,6 +624,7 @@ function BodyView({ raw, kind }: { raw: string; kind: "request" | "response" }) 
             text: streamToMarkdown(json),
             encrypted: json.encrypted,
             hiddenType: json.hiddenType,
+            raw,
           },
 	        ],
 	        label: "json",
@@ -755,7 +757,7 @@ function finalChatTurns(requestRaw: string, responseRaw: string): Turn[] {
   if (requestTurns?.length) {
     turns.push(...requestTurns);
   } else if (requestRaw.trim()) {
-    turns.push({ role: "user", text: fenceMarkdown(requestRaw.trim()) });
+    turns.push({ role: "user", text: fenceMarkdown(requestRaw.trim()), raw: requestRaw });
   }
 
   const responseTurn = responseToTurn(responseRaw);
@@ -772,6 +774,7 @@ function responseToTurn(raw: string): Turn | null {
       text: streamToMarkdown(stream),
       encrypted: stream.encrypted,
       hiddenType: stream.hiddenType,
+      raw,
     };
   }
   const json = extractResponseJSON(raw);
@@ -781,9 +784,10 @@ function responseToTurn(raw: string): Turn | null {
       text: streamToMarkdown(json),
       encrypted: json.encrypted,
       hiddenType: json.hiddenType,
+      raw,
     };
   }
-  return { role: "assistant", text: fenceMarkdown(raw.trim()) };
+  return { role: "assistant", text: fenceMarkdown(raw.trim()), raw };
 }
 
 function finalResponseBody(entry: EventLogEntry): string {
@@ -836,8 +840,17 @@ function ToggleButton({
 
 function ChatView({ turns }: { turns: Turn[] }) {
   const [expandedTools, setExpandedTools] = useState<Set<number>>(() => new Set());
+  const [expandedRaw, setExpandedRaw] = useState<Set<number>>(() => new Set());
   const toggleTool = (index: number) => {
     setExpandedTools((current) => {
+      const next = new Set(current);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  };
+  const toggleRaw = (index: number) => {
+    setExpandedRaw((current) => {
       const next = new Set(current);
       if (next.has(index)) next.delete(index);
       else next.add(index);
@@ -850,6 +863,9 @@ function ChatView({ turns }: { turns: Turn[] }) {
       {turns.map((turn, index) => {
         const isTool = isToolTurn(turn);
         const collapsed = isTool && !expandedTools.has(index);
+        const rawText = turnRawText(turn);
+        const rawExpanded = rawText != null && expandedRaw.has(index);
+        const hasActions = isTool || rawText != null;
         const bubbleClass = isTool ? "chat-bubble-tool" : chatBubbleClass(turn.role);
         return (
           <div
@@ -865,13 +881,29 @@ function ChatView({ turns }: { turns: Turn[] }) {
                   {turn.role}
                 </span>
                 <span className="chat-turn">#{index + 1}</span>
-                {isTool && (
-                  <button className="chat-toggle" onClick={() => toggleTool(index)}>
-                    {collapsed ? "Expand" : "Collapse"}
-                  </button>
+                {hasActions && (
+                  <div className="chat-actions">
+                    {isTool && (
+                      <button className="chat-toggle" onClick={() => toggleTool(index)}>
+                        {collapsed ? "Expand" : "Collapse"}
+                      </button>
+                    )}
+                    {rawText != null && (
+                      <button
+                        className={clsx("chat-toggle", rawExpanded && "chat-toggle-active")}
+                        onClick={() => toggleRaw(index)}
+                        aria-pressed={rawExpanded}
+                        title="Show original JSON"
+                      >
+                        {rawExpanded ? "Hide" : "JSON"}
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
-              {collapsed ? (
+              {rawExpanded ? (
+                <pre className="chat-raw-json">{rawText}</pre>
+              ) : collapsed ? (
                 <div className="chat-preview">{chatPreview(turn)}</div>
               ) : (
                 <>
@@ -895,6 +927,24 @@ function ChatView({ turns }: { turns: Turn[] }) {
       })}
     </div>
   );
+}
+
+function turnRawText(turn: Turn): string | null {
+  if (!Object.prototype.hasOwnProperty.call(turn, "raw")) return null;
+  return rawValueText(turn.raw);
+}
+
+function rawValueText(value: unknown): string {
+  if (typeof value === "string") {
+    const pretty = tryPrettyJson(value);
+    return pretty || JSON.stringify(value);
+  }
+  if (value === undefined) return "undefined";
+  try {
+    return JSON.stringify(value, null, 2) ?? String(value);
+  } catch {
+    return String(value);
+  }
 }
 
 function isToolTurn(turn: Turn): boolean {
