@@ -391,7 +391,7 @@ function markHidden(out: { encrypted?: boolean; hiddenType?: string }, type: str
 
 // responsesInputToTurn handles the OpenAI Responses `input[]` mixed-item
 // shape. Items with type=message fall back to messageToTurn; tool call
-// and tool output items are rendered as their own assistant/tool
+// and tool output items are rendered as their own assistant/user
 // turns so they don't show up as "user (empty)".
 function responsesInputToTurn(raw: unknown): Turn {
   const m = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
@@ -421,7 +421,7 @@ function responsesInputToTurn(raw: unknown): Turn {
   if (type === "function_call_output" || type === "custom_tool_call_output") {
     const out = typeof m.output === "string" ? m.output : JSON.stringify(m.output ?? "", null, 2);
     return {
-      role: "tool",
+      role: "user",
       text: toolResultMarkdown(m.call_id, out),
       raw: m,
     };
