@@ -326,6 +326,26 @@ function dataToImageURL(mediaType: string, data: string): string | null {
   return isBase64Payload(payload) ? `data:${normalized};base64,${payload}` : null;
 }
 
+function imageGenerationMarkdown(image: OpenAIImageGeneration): string | null {
+  const data = image.result || image.partial;
+  if (!data) return null;
+  const mimeType = image.mimeType || imageMimeTypeFromOutputFormat(image.outputFormat) || "image/png";
+  const url = dataToImageURL(mimeType, data);
+  if (!url) return null;
+  const alt = image.result ? "generated image" : "partial generated image";
+  return `![${alt}](${url})`;
+}
+
+function imageMimeTypeFromOutputFormat(raw?: string): string | null {
+  const format = (raw || "").trim().toLowerCase().replace(/^\./, "");
+  if (!format) return null;
+  if (format === "jpg") return "image/jpeg";
+  if (format === "png" || format === "jpeg" || format === "gif" || format === "webp") {
+    return `image/${format}`;
+  }
+  return null;
+}
+
 function isDisplayableImageURL(url: string): boolean {
   const trimmed = url.trim();
   return isSafeDataImageURL(trimmed) || /^https?:\/\//i.test(trimmed);
@@ -591,6 +611,14 @@ export interface StreamExtraction {
   raw?: unknown;
 }
 
+interface OpenAIImageGeneration {
+  order: number;
+  result?: string;
+  partial?: string;
+  mimeType?: string;
+  outputFormat?: string;
+}
+
 interface AnthropicBlock {
   index: number;
   type: string;
@@ -616,11 +644,10 @@ export function extractResponseStream(text: string): StreamExtraction {
   const blocks = new Map<number, AnthropicBlock>();
   const blockOrder: number[] = [];
 
-  // OpenAI Responses function_call items are streamed as
-  // response.output_item.added (with name/call_id) followed by
-  // response.function_call_arguments.delta chunks. Track them by
-  // output_index and flush at the end so the user sees the actual tool call
-  // even when the response contains no output_text.
+  // OpenAI Responses output items can arrive outside output_text deltas:
+  // tool calls stream their arguments, while image generation streams base64
+  // payloads on the item itself. Track them by output_index and flush at the
+  // end so non-text responses don't render as empty assistant turns.
   interface OpenAICall {
     name: string;
     callID: string;
@@ -629,7 +656,8 @@ export function extractResponseStream(text: string): StreamExtraction {
     custom?: boolean;
   }
   const openAICalls = new Map<number, OpenAICall>();
-  let openAICallOrder = 0;
+  const openAIImages = new Map<number, OpenAIImageGeneration>();
+  let openAIItemOrder = 0;
 
   // CPA logs the SSE stream as-is plus a leading "Status: 200" / header
   // block. Walk line by line and only act on `data:` rows.
@@ -724,7 +752,7 @@ export function extractResponseStream(text: string): StreamExtraction {
             name: "tool",
             callID: "",
             args: o.delta,
-            order: openAICallOrder++,
+            order: openAIItemOrder++,
           });
         }
       }
@@ -739,11 +767,25 @@ export function extractResponseStream(text: string): StreamExtraction {
             name: "tool",
             callID: "",
             args: o.delta,
-            order: openAICallOrder++,
+            order: openAIItemOrder++,
             custom: true,
           });
         }
       }
+    }
+    if (
+      o.type === "response.image_generation_call.partial_image" &&
+      typeof o.partial_image_b64 === "string"
+    ) {
+      const idx = typeof o.output_index === "number" ? (o.output_index as number) : -1;
+      const existing = openAIImages.get(idx);
+      openAIImages.set(idx, {
+        order: existing?.order ?? openAIItemOrder++,
+        result: existing?.result,
+        partial: o.partial_image_b64,
+        mimeType: existing?.mimeType,
+        outputFormat: stringValue(o.output_format) || existing?.outputFormat,
+      });
     }
     if (o.type === "response.output_item.added") {
       const item = (o.item as Record<string, unknown>) || {};
@@ -755,7 +797,7 @@ export function extractResponseStream(text: string): StreamExtraction {
           name: typeof item.name === "string" ? (item.name as string) : existing?.name || "tool",
           callID: typeof item.call_id === "string" ? (item.call_id as string) : existing?.callID || "",
           args: (existing?.args || "") + partial,
-          order: existing?.order ?? openAICallOrder++,
+          order: existing?.order ?? openAIItemOrder++,
         });
       } else if (item.type === "custom_tool_call") {
         const idx = typeof o.output_index === "number" ? (o.output_index as number) : -1;
@@ -765,8 +807,18 @@ export function extractResponseStream(text: string): StreamExtraction {
           name: typeof item.name === "string" ? (item.name as string) : existing?.name || "tool",
           callID: typeof item.call_id === "string" ? (item.call_id as string) : existing?.callID || "",
           args: (existing?.args || "") + partial,
-          order: existing?.order ?? openAICallOrder++,
+          order: existing?.order ?? openAIItemOrder++,
           custom: true,
+        });
+      } else if (item.type === "image_generation_call") {
+        const idx = typeof o.output_index === "number" ? (o.output_index as number) : -1;
+        const existing = openAIImages.get(idx);
+        openAIImages.set(idx, {
+          order: existing?.order ?? openAIItemOrder++,
+          result: stringValue(item.result) || existing?.result,
+          partial: existing?.partial,
+          mimeType: stringValue(item.mime_type ?? item.media_type) || existing?.mimeType,
+          outputFormat: stringValue(item.output_format) || existing?.outputFormat,
         });
       } else if (item.type === "reasoning" && hasEncryptedReasoning(item)) {
         markHidden(out, "reasoning");
@@ -786,8 +838,17 @@ export function extractResponseStream(text: string): StreamExtraction {
           name: stringValue(item.name) || existing?.name || "tool",
           callID: stringValue(item.call_id) || existing?.callID || "",
           args: input || existing?.args || "",
-          order: existing?.order ?? openAICallOrder++,
+          order: existing?.order ?? openAIItemOrder++,
           custom: item.type === "custom_tool_call" || existing?.custom,
+        });
+      } else if (itemType === "image_generation_call") {
+        const existingImage = openAIImages.get(idx);
+        openAIImages.set(idx, {
+          order: existingImage?.order ?? openAIItemOrder++,
+          result: stringValue(item.result) || existingImage?.result,
+          partial: existingImage?.partial,
+          mimeType: stringValue(item.mime_type ?? item.media_type) || existingImage?.mimeType,
+          outputFormat: stringValue(item.output_format) || existingImage?.outputFormat,
         });
       } else if (itemType === "web_search_call") {
         appendResponseMarkdown(out, webSearchCallMarkdown(item));
@@ -839,6 +900,23 @@ export function extractResponseStream(text: string): StreamExtraction {
     }
   }
 
+  const finalResponseOutput = (completedResponse ?? latestResponse)?.output;
+  if (Array.isArray(finalResponseOutput)) {
+    finalResponseOutput.forEach((item, index) => {
+      if (!item || typeof item !== "object") return;
+      const it = item as Record<string, unknown>;
+      if (it.type !== "image_generation_call") return;
+      const existing = openAIImages.get(index);
+      openAIImages.set(index, {
+        order: existing?.order ?? openAIItemOrder++,
+        result: stringValue(it.result) || existing?.result,
+        partial: existing?.partial,
+        mimeType: stringValue(it.mime_type ?? it.media_type) || existing?.mimeType,
+        outputFormat: stringValue(it.output_format) || existing?.outputFormat,
+      });
+    });
+  }
+
   // Flush Anthropic blocks in the order they were declared so tool_use calls
   // appear inline alongside the assistant's prose.
   for (const idx of blockOrder) {
@@ -868,13 +946,23 @@ export function extractResponseStream(text: string): StreamExtraction {
     }
   }
 
-  // Flush OpenAI Responses tool call items in arrival order.
-  const calls = Array.from(openAICalls.values()).sort((a, b) => a.order - b.order);
-  for (const c of calls) {
+  // Flush OpenAI Responses output items in arrival order.
+  const responseItems: Array<{ order: number; markdown: string }> = [];
+  for (const image of openAIImages.values()) {
+    const markdown = imageGenerationMarkdown(image);
+    if (markdown) responseItems.push({ order: image.order, markdown });
+  }
+  for (const c of openAICalls.values()) {
     const input = c.custom ? c.args : formatPartialJSON(c.args);
     const language = c.custom ? customToolLanguage(c.name, input) : "json";
-    const sep = out.content ? "\n\n" : "";
-    out.content += sep + toolUseMarkdown(c.name, c.callID, input, language);
+    responseItems.push({
+      order: c.order,
+      markdown: toolUseMarkdown(c.name, c.callID, input, language),
+    });
+  }
+  responseItems.sort((a, b) => a.order - b.order);
+  for (const item of responseItems) {
+    appendResponseMarkdown(out, item.markdown);
   }
 
   if (out.detected) {
@@ -1068,10 +1156,14 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
         continue;
       }
       if (it.type === "image_generation_call" && typeof it.result === "string") {
-        const mimeType = stringValue(it.mime_type ?? it.media_type) || "image/png";
-        const url = dataToImageURL(mimeType, it.result);
-        if (url) {
-          appendResponseMarkdown(out, `![generated image](${url})`);
+        const markdown = imageGenerationMarkdown({
+          order: 0,
+          result: it.result,
+          mimeType: stringValue(it.mime_type ?? it.media_type),
+          outputFormat: stringValue(it.output_format),
+        });
+        if (markdown) {
+          appendResponseMarkdown(out, markdown);
           out.detected = true;
         }
         continue;
