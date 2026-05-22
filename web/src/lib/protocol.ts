@@ -1046,8 +1046,9 @@ function formatPartialJSON(raw: string): string {
 // found.
 export function extractResponseJSON(rawJson: string): StreamExtraction | null {
   let obj: unknown;
+  const jsonText = stripLoggedResponseEnvelope(rawJson);
   try {
-    obj = JSON.parse(rawJson);
+    obj = JSON.parse(jsonText);
   } catch {
     return null;
   }
@@ -1223,6 +1224,20 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
   }
 
   return out.detected ? out : null;
+}
+
+function stripLoggedResponseEnvelope(text: string): string {
+  const trimmed = text.trim();
+  if (/^[\[{]/.test(trimmed)) return trimmed;
+
+  const normalized = text.replace(/\r\n/g, "\n");
+  if (!/^\s*Status:\s*\d{3}\b/m.test(normalized)) return trimmed;
+
+  const bodySeparator = /\n[ \t]*\n/.exec(normalized);
+  const body = bodySeparator
+    ? normalized.slice(bodySeparator.index + bodySeparator[0].length).trim()
+    : "";
+  return body && /^[\[{]/.test(body) ? body : trimmed;
 }
 
 function appendResponseMarkdown(out: StreamExtraction, chunk: string) {
