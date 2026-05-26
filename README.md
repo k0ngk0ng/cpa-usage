@@ -110,7 +110,7 @@ All endpoints are mounted under `<APP_BASE_PATH>/api/v1`. Protected endpoints re
 | GET | `/aliases/export` | JSON dump of all aliases |
 | POST | `/aliases/import` | bulk merge / replace |
 
-Common query params: `range=all|today|4h|8h|12h|24h|7d|30d|custom`, `start`, `end`, `model` (repeatable), `source` (repeatable), `auth_index`, `result=success|failed`, `page`, `page_size`.
+Common query params: `range=all|today|4h|8h|12h|24h|2d|3d|7d|30d|custom`, `start`, `end`, `model` (repeatable), `source` (repeatable), `auth_index`, `result=success|failed`, `page`, `page_size`.
 
 ## Architecture
 

@@ -9,6 +9,8 @@ const RANGE_PRESETS: { key: RangeKey; label: string }[] = [
   { key: "8h", label: "8h" },
   { key: "12h", label: "12h" },
   { key: "24h", label: "24h" },
+  { key: "2d", label: "2d" },
+  { key: "3d", label: "3d" },
   { key: "7d", label: "7d" },
   { key: "30d", label: "30d" },
   { key: "all", label: "All" },
@@ -54,6 +56,18 @@ export default function FilterBar({
   }, [filter.range, filter.start, filter.end, filter.authIndex, showFacets]);
 
   const update = (patch: Partial<Filter>) => onChange({ ...filter, ...patch });
+  const updateRange = (range: RangeKey) => {
+    if (range !== "custom") {
+      update({ range });
+      return;
+    }
+    const defaults = defaultCustomRange();
+    update({
+      range,
+      start: filter.start || defaults.start,
+      end: filter.end || defaults.end,
+    });
+  };
 
   return (
     <div className="bg-panel border border-border rounded-lg p-4 mb-6 space-y-3">
@@ -62,7 +76,7 @@ export default function FilterBar({
         {RANGE_PRESETS.map((p) => (
           <button
             key={p.key}
-            onClick={() => update({ range: p.key })}
+            onClick={() => updateRange(p.key)}
             className={clsx(
               "px-3 py-1 rounded text-xs border transition-colors",
               filter.range === p.key
@@ -74,19 +88,21 @@ export default function FilterBar({
           </button>
         ))}
         {filter.range === "custom" && (
-          <div className="flex items-center gap-2 ml-2">
-            <input
-              type="datetime-local"
-              value={filter.start || ""}
-              onChange={(e) => update({ start: e.target.value })}
-              className="bg-panel2 border border-border rounded px-2 py-1 text-xs"
+          <div className="flex flex-wrap items-center gap-2 ml-2">
+            <DateTimeField
+              dateLabel="Start date"
+              timeLabel="Start time"
+              fallbackTime="00:00"
+              value={filter.start}
+              onChange={(start) => update({ start })}
             />
             <span className="text-muted text-xs">→</span>
-            <input
-              type="datetime-local"
-              value={filter.end || ""}
-              onChange={(e) => update({ end: e.target.value })}
-              className="bg-panel2 border border-border rounded px-2 py-1 text-xs"
+            <DateTimeField
+              dateLabel="End date"
+              timeLabel="End time"
+              fallbackTime="23:59"
+              value={filter.end}
+              onChange={(end) => update({ end })}
             />
           </div>
         )}
@@ -140,6 +156,89 @@ export default function FilterBar({
       )}
     </div>
   );
+}
+
+function DateTimeField({
+  dateLabel,
+  timeLabel,
+  fallbackTime,
+  value,
+  onChange,
+}: {
+  dateLabel: string;
+  timeLabel: string;
+  fallbackTime: string;
+  value?: string;
+  onChange: (next?: string) => void;
+}) {
+  const parts = splitDateTime(value);
+  const date = parts.date;
+  const time = parts.time || (date ? fallbackTime : "");
+
+  return (
+    <div className="flex items-center gap-1">
+      <input
+        aria-label={dateLabel}
+        type="date"
+        value={date}
+        onChange={(e) => {
+          const nextDate = e.target.value;
+          onChange(nextDate ? joinDateTime(nextDate, parts.time || fallbackTime) : undefined);
+        }}
+        className="bg-panel2 border border-border rounded px-2 py-1 text-xs w-36"
+      />
+      <input
+        aria-label={timeLabel}
+        type="time"
+        lang="en-GB"
+        step={60}
+        value={time}
+        onChange={(e) => {
+          const nextTime = e.target.value;
+          if (!nextTime) {
+            onChange(date ? joinDateTime(date, fallbackTime) : undefined);
+            return;
+          }
+          onChange(joinDateTime(date || localDatePart(new Date()), nextTime));
+        }}
+        className="bg-panel2 border border-border rounded px-2 py-1 text-xs w-24"
+      />
+    </div>
+  );
+}
+
+function defaultCustomRange(): { start: string; end: string } {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setHours(23, 59, 0, 0);
+  return {
+    start: formatLocalDateTime(start),
+    end: formatLocalDateTime(end),
+  };
+}
+
+function splitDateTime(value?: string): { date: string; time: string } {
+  const match = value?.match(/^(\d{4}-\d{2}-\d{2})(?:[T\s](\d{2}:\d{2}))?/);
+  return {
+    date: match?.[1] || "",
+    time: match?.[2] || "",
+  };
+}
+
+function joinDateTime(date: string, time: string): string {
+  return `${date}T${time}`;
+}
+
+function formatLocalDateTime(d: Date): string {
+  return `${localDatePart(d)}T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+function localDatePart(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function MultiSelect({

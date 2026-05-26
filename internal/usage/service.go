@@ -92,6 +92,14 @@ func ParseFilter(rangeKey string, startStr, endStr string, models, sources, apiK
 	case "24h":
 		f.End = now
 		f.Start = now.Add(-24 * time.Hour)
+	case "2d":
+		end := startOfDay(now).Add(24 * time.Hour)
+		f.End = end
+		f.Start = end.Add(-2 * 24 * time.Hour)
+	case "3d":
+		end := startOfDay(now).Add(24 * time.Hour)
+		f.End = end
+		f.Start = end.Add(-3 * 24 * time.Hour)
 	case "7d":
 		end := startOfDay(now).Add(24 * time.Hour)
 		f.End = end
@@ -353,7 +361,9 @@ func parseTime(in string) (time.Time, error) {
 		time.RFC3339Nano,
 		time.RFC3339,
 		"2006-01-02T15:04:05",
+		"2006-01-02T15:04",
 		"2006-01-02 15:04:05",
+		"2006-01-02 15:04",
 		"2006-01-02",
 	} {
 		if t, err := time.ParseInLocation(layout, in, time.Local); err == nil {

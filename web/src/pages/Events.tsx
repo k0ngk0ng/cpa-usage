@@ -10,7 +10,7 @@ import { formatCost, formatLatency, formatNumber, formatTimestamp } from "../lib
 import type { Filter, RangeKey, ResultFilter, UsageEventRecord, UsageEventsPage } from "../api/types";
 
 const PAGE_SIZES = [20, 50, 100, 500, 1000];
-const RANGE_KEYS: RangeKey[] = ["all", "today", "4h", "8h", "12h", "24h", "7d", "30d", "custom"];
+const RANGE_KEYS: RangeKey[] = ["all", "today", "4h", "8h", "12h", "24h", "2d", "3d", "7d", "30d", "custom"];
 const RESULT_KEYS: ResultFilter[] = ["", "success", "failed"];
 
 export default function EventsPage() {

@@ -13,6 +13,8 @@ export type RangeKey =
   | "8h"
   | "12h"
   | "24h"
+  | "2d"
+  | "3d"
   | "7d"
   | "30d"
   | "custom";
