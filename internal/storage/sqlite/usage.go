@@ -172,6 +172,9 @@ func (s *Store) applyFilter(ctx context.Context, f storage.UsageFilter) *gorm.DB
 	if len(f.APIKeys) > 0 {
 		q = q.Where("api_key IN ?", f.APIKeys)
 	}
+	if f.RequestID != "" {
+		q = q.Where("request_id = ?", f.RequestID)
+	}
 	switch f.Result {
 	case "success":
 		q = q.Where("failed = ?", false)

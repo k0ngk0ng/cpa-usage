@@ -37,8 +37,9 @@ func parseFilterFromQuery(c *gin.Context) (usage.Filter, error) {
 	apiKeys := c.QueryArray("api_key")
 	authIndex := c.Query("auth_index")
 	result := c.Query("result")
+	requestID := c.Query("request_id")
 	now := time.Now().In(time.Local)
-	return usage.ParseFilter(rangeKey, startStr, endStr, models, sources, apiKeys, authIndex, result, now)
+	return usage.ParseFilter(rangeKey, startStr, endStr, models, sources, apiKeys, authIndex, result, requestID, now)
 }
 
 func usageOverviewHandler(deps UsageDeps) gin.HandlerFunc {

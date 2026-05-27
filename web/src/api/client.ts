@@ -90,6 +90,7 @@ function buildQuery(filter: Filter, extra: Record<string, string | number | unde
   for (const k of filter.apiKey) sp.append("api_key", k);
   if (filter.authIndex) sp.set("auth_index", filter.authIndex);
   if (filter.result) sp.set("result", filter.result);
+  if (filter.requestId) sp.set("request_id", filter.requestId);
   for (const [k, v] of Object.entries(extra)) {
     if (v !== undefined && v !== "") sp.set(k, String(v));
   }
@@ -104,6 +105,7 @@ function buildFacetQuery(filter: Filter, extra: Record<string, string | number |
   for (const k of filter.apiKey) sp.append("api_key", k);
   if (filter.authIndex) sp.set("auth_index", filter.authIndex);
   if (filter.result) sp.set("result", filter.result);
+  if (filter.requestId) sp.set("request_id", filter.requestId);
   for (const [k, v] of Object.entries(extra)) {
     if (v !== undefined && v !== "") sp.set(k, String(v));
   }

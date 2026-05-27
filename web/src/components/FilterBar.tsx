@@ -40,7 +40,7 @@ export default function FilterBar({
     if (!showFacets) return;
     let cancelled = false;
     api
-      .eventFilters({ ...filter, models: [], sources: [], apiKey: [], result: "" })
+      .eventFilters({ ...filter, models: [], sources: [], apiKey: [], result: "", requestId: "" })
       .then((opts) => {
         if (cancelled) return;
         setModels(opts.models || []);

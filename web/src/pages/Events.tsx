@@ -7,6 +7,7 @@ import { api } from "../api/client";
 import { todayFilter, useFilter } from "../hooks/useFilter";
 import { useRefreshTick } from "../lib/refresh";
 import { formatCost, formatLatency, formatNumber, formatTimestamp } from "../lib/utils";
+import type { FormEvent } from "react";
 import type { Filter, RangeKey, ResultFilter, UsageEventRecord, UsageEventsPage } from "../api/types";
 
 const PAGE_SIZES = [20, 50, 100, 500, 1000];
@@ -14,21 +15,33 @@ const RANGE_KEYS: RangeKey[] = ["all", "today", "4h", "8h", "12h", "24h", "2d", 
 const RESULT_KEYS: ResultFilter[] = ["", "success", "failed"];
 
 export default function EventsPage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const initialFilter = useMemo(() => filterFromSearch(searchParams), [searchParams]);
   const { filter, setFilter } = useFilter(initialFilter);
+  const [requestInput, setRequestInput] = useState(initialFilter.requestId);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(100);
   const [data, setData] = useState<UsageEventsPage | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [selected, setSelected] = useState<UsageEventRecord | null>(null);
+  const [autoOpenedRequestId, setAutoOpenedRequestId] = useState("");
   const tick = useRefreshTick();
+
+  const applyFilter = (next: Filter, replace = true) => {
+    setFilter(next);
+    setPage(1);
+    setSearchParams(searchFromFilter(next), { replace });
+  };
 
   // Reset to page 1 when filter changes.
   useEffect(() => {
     setPage(1);
   }, [filter]);
+
+  useEffect(() => {
+    setRequestInput(filter.requestId);
+  }, [filter.requestId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -49,6 +62,40 @@ export default function EventsPage() {
       cancelled = true;
     };
   }, [filter, page, pageSize, tick]);
+
+  useEffect(() => {
+    if (!filter.requestId) {
+      setAutoOpenedRequestId("");
+      return;
+    }
+    const item = data?.Items?.[0];
+    if (
+      data?.Items.length === 1 &&
+      item?.request_id === filter.requestId &&
+      autoOpenedRequestId !== filter.requestId
+    ) {
+      setSelected(item);
+      setAutoOpenedRequestId(filter.requestId);
+    }
+  }, [autoOpenedRequestId, data, filter.requestId]);
+
+  const handleRequestSearch = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const requestId = requestInput.trim();
+    const next: Filter = { ...filter, requestId };
+    if (requestId) {
+      next.range = "all";
+      next.start = undefined;
+      next.end = undefined;
+    }
+    applyFilter(next, false);
+  };
+
+  const clearRequestSearch = () => {
+    setRequestInput("");
+    setSelected(null);
+    applyFilter({ ...filter, requestId: "" }, false);
+  };
 
   const cols: Column<UsageEventRecord>[] = [
     {
@@ -123,12 +170,47 @@ export default function EventsPage() {
       cell: (r) => formatNumber(r.input_tokens + r.cached_tokens),
     },
     { header: "Output", align: "right", cellClassName: "whitespace-nowrap", cell: (r) => formatNumber(r.output_tokens) },
+    { header: "Reasoning", align: "right", cellClassName: "whitespace-nowrap", cell: (r) => formatNumber(r.reasoning_tokens) },
+    {
+      header: "Total",
+      align: "right",
+      cellClassName: "whitespace-nowrap font-medium",
+      cell: (r) => formatNumber(r.total_tokens),
+    },
     { header: "Cost", align: "right", cellClassName: "whitespace-nowrap", cell: (r) => formatCost(r.cost) },
   ];
 
   return (
     <div>
-      <FilterBar filter={filter} onChange={setFilter} showApiKey />
+      <FilterBar filter={filter} onChange={applyFilter} showApiKey />
+      <form
+        onSubmit={handleRequestSearch}
+        className="bg-panel border border-border rounded-lg p-3 mb-4 flex flex-wrap items-center gap-2"
+      >
+        <input
+          aria-label="request_id"
+          type="search"
+          placeholder="request_id"
+          value={requestInput}
+          onChange={(e) => setRequestInput(e.target.value)}
+          className="bg-panel2 border border-border rounded px-2 py-1 text-xs font-mono w-full sm:min-w-[18rem] sm:flex-1 sm:max-w-xl"
+        />
+        <button
+          type="submit"
+          className="px-3 py-1 rounded text-xs border border-accent bg-accent text-bg hover:brightness-110"
+        >
+          Search
+        </button>
+        {filter.requestId && (
+          <button
+            type="button"
+            onClick={clearRequestSearch}
+            className="px-3 py-1 rounded text-xs border border-border bg-panel2 text-muted hover:text-ink"
+          >
+            Clear
+          </button>
+        )}
+      </form>
       {err && (
         <div className="bg-danger/10 border border-danger/30 text-danger rounded-lg p-3 text-sm mb-4">
           {err}
@@ -164,8 +246,10 @@ export default function EventsPage() {
 }
 
 function filterFromSearch(sp: URLSearchParams): Filter {
+  const requestId = (sp.get("request_id") || "").trim();
   const rangeParam = sp.get("range");
-  const range = RANGE_KEYS.includes(rangeParam as RangeKey) ? (rangeParam as RangeKey) : todayFilter.range;
+  const fallbackRange = requestId ? "all" : todayFilter.range;
+  const range = RANGE_KEYS.includes(rangeParam as RangeKey) ? (rangeParam as RangeKey) : fallbackRange;
   const resultParam = sp.get("result") ?? "";
   const result = RESULT_KEYS.includes(resultParam as ResultFilter) ? (resultParam as ResultFilter) : "";
   return {
@@ -178,7 +262,24 @@ function filterFromSearch(sp: URLSearchParams): Filter {
     apiKey: sp.getAll("api_key"),
     authIndex: sp.get("auth_index") || "",
     result,
+    requestId,
   };
+}
+
+function searchFromFilter(filter: Filter): URLSearchParams {
+  const sp = new URLSearchParams();
+  if (filter.range) sp.set("range", filter.range);
+  if (filter.range === "custom") {
+    if (filter.start) sp.set("start", filter.start);
+    if (filter.end) sp.set("end", filter.end);
+  }
+  for (const model of filter.models) sp.append("model", model);
+  for (const source of filter.sources) sp.append("source", source);
+  for (const apiKey of filter.apiKey) sp.append("api_key", apiKey);
+  if (filter.authIndex) sp.set("auth_index", filter.authIndex);
+  if (filter.result) sp.set("result", filter.result);
+  if (filter.requestId) sp.set("request_id", filter.requestId);
+  return sp;
 }
 
 interface PageProps {

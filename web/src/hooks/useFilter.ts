@@ -8,6 +8,7 @@ export const defaultFilter: Filter = {
   apiKey: [],
   authIndex: "",
   result: "",
+  requestId: "",
 };
 
 export const todayFilter: Filter = {
@@ -23,6 +24,7 @@ interface UseFilterResult {
   setSources: (s: string[]) => void;
   setAuthIndex: (a: string) => void;
   setResult: (r: ResultFilter) => void;
+  setRequestId: (r: string) => void;
   setCustomRange: (start: string, end: string) => void;
   reset: () => void;
 }
@@ -45,10 +47,13 @@ export function useFilter(initial: Filter = defaultFilter): UseFilterResult {
   const setResult = useCallback((result: ResultFilter) => {
     setFilter((prev) => ({ ...prev, result }));
   }, []);
+  const setRequestId = useCallback((requestId: string) => {
+    setFilter((prev) => ({ ...prev, requestId }));
+  }, []);
   const setCustomRange = useCallback((start: string, end: string) => {
     setFilter((prev) => ({ ...prev, range: "custom", start, end }));
   }, []);
   const reset = useCallback(() => setFilter(initial), [initial]);
 
-  return { filter, setFilter, setRange, setModels, setSources, setAuthIndex, setResult, setCustomRange, reset };
+  return { filter, setFilter, setRange, setModels, setSources, setAuthIndex, setResult, setRequestId, setCustomRange, reset };
 }

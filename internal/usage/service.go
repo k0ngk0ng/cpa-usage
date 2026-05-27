@@ -50,6 +50,7 @@ type Filter struct {
 	AuthIndex string
 	Result    string
 	APIKeys   []string
+	RequestID string
 }
 
 // Page mirrors storage.Page but is exposed at the service layer so handlers
@@ -61,11 +62,12 @@ type Page struct {
 
 // ParseFilter normalizes raw query-string values into a Filter.
 // `now` is injected so tests can pin the clock.
-func ParseFilter(rangeKey string, startStr, endStr string, models, sources, apiKeys []string, authIndex, result string, now time.Time) (Filter, error) {
+func ParseFilter(rangeKey string, startStr, endStr string, models, sources, apiKeys []string, authIndex, result, requestID string, now time.Time) (Filter, error) {
 	f := Filter{
 		Range:     strings.TrimSpace(rangeKey),
 		AuthIndex: strings.TrimSpace(authIndex),
 		Result:    strings.TrimSpace(result),
+		RequestID: strings.TrimSpace(requestID),
 		Models:    cleanList(models),
 		Sources:   cleanList(sources),
 		APIKeys:   cleanList(apiKeys),
@@ -336,6 +338,7 @@ func (f Filter) toStorage() storage.UsageFilter {
 		AuthIndex: f.AuthIndex,
 		Result:    f.Result,
 		APIKeys:   f.APIKeys,
+		RequestID: f.RequestID,
 	}
 }
 

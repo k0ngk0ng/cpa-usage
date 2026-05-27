@@ -11,7 +11,7 @@ func TestParseFilterCustomAcceptsDatetimeLocalMinutePrecision(t *testing.T) {
 	time.Local = loc
 	defer func() { time.Local = oldLocal }()
 
-	f, err := ParseFilter("custom", "2016-02-21T00:00", "2016-02-21T23:59", nil, nil, nil, "", "", time.Now())
+	f, err := ParseFilter("custom", "2016-02-21T00:00", "2016-02-21T23:59", nil, nil, nil, "", "", "", time.Now())
 	if err != nil {
 		t.Fatalf("ParseFilter returned error: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestParseFilterDayRanges(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			f, err := ParseFilter(tc.rangeKey, "", "", nil, nil, nil, "", "", now)
+			f, err := ParseFilter(tc.rangeKey, "", "", nil, nil, nil, "", "", "", now)
 			if err != nil {
 				t.Fatalf("ParseFilter returned error: %v", err)
 			}
@@ -63,5 +63,15 @@ func TestParseFilterDayRanges(t *testing.T) {
 				t.Fatalf("end = %v, want %v", f.End, tc.wantEnd)
 			}
 		})
+	}
+}
+
+func TestParseFilterTrimsRequestID(t *testing.T) {
+	f, err := ParseFilter("all", "", "", nil, nil, nil, "", "", " req_123 ", time.Now())
+	if err != nil {
+		t.Fatalf("ParseFilter returned error: %v", err)
+	}
+	if f.RequestID != "req_123" {
+		t.Fatalf("request id = %q, want %q", f.RequestID, "req_123")
 	}
 }

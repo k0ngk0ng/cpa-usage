@@ -124,17 +124,31 @@ export default function Overview() {
       )}
 
       <div className="space-y-6">
-        <div>
-          <h2 className="text-sm uppercase tracking-wider text-muted mb-2">
-            {useDaily ? "Daily traffic" : "Hourly traffic"}
-          </h2>
-          {loading && !data ? (
-            <div className="bg-panel border border-border rounded-lg p-8 text-center text-muted text-sm">
-              Loading…
-            </div>
-          ) : (
-            <SeriesChart data={series} granularity={useDaily ? "daily" : "hourly"} />
-          )}
+        <div className="grid gap-6 xl:grid-cols-2">
+          <div>
+            <h2 className="text-sm uppercase tracking-wider text-muted mb-2">
+              {useDaily ? "Daily requests" : "Hourly requests"}
+            </h2>
+            {loading && !data ? (
+              <div className="bg-panel border border-border rounded-lg p-8 text-center text-muted text-sm">
+                Loading…
+              </div>
+            ) : (
+              <SeriesChart data={series} granularity={useDaily ? "daily" : "hourly"} />
+            )}
+          </div>
+          <div>
+            <h2 className="text-sm uppercase tracking-wider text-muted mb-2">
+              {useDaily ? "Daily tokens" : "Hourly tokens"}
+            </h2>
+            {loading && !data ? (
+              <div className="bg-panel border border-border rounded-lg p-8 text-center text-muted text-sm">
+                Loading…
+              </div>
+            ) : (
+              <SeriesChart data={series} granularity={useDaily ? "daily" : "hourly"} mode="tokens" />
+            )}
+          </div>
         </div>
 
         <div>

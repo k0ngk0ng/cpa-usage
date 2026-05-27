@@ -15,7 +15,7 @@ type usageEventModel struct {
 	AuthType        string    `gorm:"size:32"`
 	APIKey          string    `gorm:"size:128;column:api_key"`
 	Endpoint        string    `gorm:"size:128"`
-	RequestID       string    `gorm:"size:64;column:request_id"`
+	RequestID       string    `gorm:"size:64;column:request_id;index"`
 	LatencyMs       int64
 	InputTokens     int64
 	OutputTokens    int64

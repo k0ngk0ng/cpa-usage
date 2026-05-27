@@ -99,6 +99,7 @@ type UsageFilter struct {
 	AuthIndex string
 	Result    string // "" | success | failed
 	APIKeys   []string
+	RequestID string
 }
 
 // HasRange reports whether the filter requests a bounded window.

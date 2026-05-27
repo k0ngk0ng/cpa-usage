@@ -30,6 +30,7 @@ export interface Filter {
   apiKey: string[];
   authIndex: string;
   result: ResultFilter;
+  requestId: string;
 }
 
 export interface Session {
