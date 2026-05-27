@@ -1,7 +1,7 @@
 import {
   Area,
-  AreaChart,
   CartesianGrid,
+  ComposedChart,
   Legend,
   ResponsiveContainer,
   Tooltip,
@@ -22,7 +22,6 @@ interface AreaSpec {
   key: string;
   label: string;
   color: string;
-  stack?: string;
 }
 
 const REQUEST_AREAS: AreaSpec[] = [
@@ -31,10 +30,8 @@ const REQUEST_AREAS: AreaSpec[] = [
 ];
 
 const TOKEN_AREAS: AreaSpec[] = [
-  { key: "new_input", label: "New input", color: "#38bdf8", stack: "tokens" },
-  { key: "cache_hit", label: "Cache hit", color: "#facc15", stack: "tokens" },
-  { key: "output", label: "Output", color: "#fb7185", stack: "tokens" },
-  { key: "reasoning", label: "Reasoning", color: "#a78bfa", stack: "tokens" },
+  { key: "input", label: "Input", color: "#38bdf8" },
+  { key: "output", label: "Output", color: "#fb7185" },
 ];
 
 export default function SeriesChart({ data, granularity, mode = "requests", height = 280 }: Props) {
@@ -53,10 +50,8 @@ export default function SeriesChart({ data, granularity, mode = "requests", heig
       ? {
           bucket: d.bucket,
           label: labelFor(d.bucket),
-          new_input: d.input_tokens,
-          cache_hit: d.cached_tokens,
-          output: d.output_tokens,
-          reasoning: d.reasoning_tokens,
+          input: d.input_tokens + d.cached_tokens,
+          output: d.output_tokens + d.reasoning_tokens,
         }
       : {
           bucket: d.bucket,
@@ -77,7 +72,7 @@ export default function SeriesChart({ data, granularity, mode = "requests", heig
   return (
     <div className="bg-panel border border-border rounded-lg p-4">
       <ResponsiveContainer width="100%" height={height}>
-        <AreaChart data={series} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+        <ComposedChart data={series} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
           <defs>
             {areas.map((area) => (
               <linearGradient key={area.key} id={gradientID(mode, area.key)} x1="0" y1="0" x2="0" y2="1">
@@ -113,13 +108,12 @@ export default function SeriesChart({ data, granularity, mode = "requests", heig
               type="monotone"
               dataKey={area.key}
               name={area.label}
-              stackId={area.stack}
               stroke={area.color}
               fill={`url(#${gradientID(mode, area.key)})`}
               strokeWidth={2}
             />
           ))}
-        </AreaChart>
+        </ComposedChart>
       </ResponsiveContainer>
     </div>
   );
