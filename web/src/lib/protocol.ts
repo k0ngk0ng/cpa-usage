@@ -609,6 +609,7 @@ export interface StreamExtraction {
   hiddenType?: string;
   errors: string[];
   raw?: unknown;
+  rawContent?: unknown[];
 }
 
 interface OpenAIImageGeneration {
@@ -919,21 +920,34 @@ export function extractResponseStream(text: string): StreamExtraction {
 
   // Flush Anthropic blocks in the order they were declared so tool_use calls
   // appear inline alongside the assistant's prose.
+  const anthropicContent: Record<string, unknown>[] = [];
   for (const idx of blockOrder) {
     const b = blocks.get(idx);
     if (!b) continue;
     if (b.type === "text") {
       out.content += b.text;
+      if (b.text) anthropicContent.push({ type: "text", text: b.text });
     } else if (b.type === "thinking") {
       if (b.text) out.thinking += b.text;
       else if (b.encrypted) markHidden(out, b.hiddenType || b.type);
+      anthropicContent.push({
+        type: "thinking",
+        ...(b.text ? { thinking: b.text } : {}),
+        ...(b.encrypted ? { encrypted: true } : {}),
+      });
     } else if (b.type === "redacted_thinking") {
       markHidden(out, b.hiddenType || b.type);
+      anthropicContent.push({ type: "redacted_thinking" });
     } else if (b.type === "tool_use") {
       const json = formatPartialJSON(b.partialJSON);
       const name = b.name || "tool";
       const sep = out.content ? "\n\n" : "";
       out.content += sep + toolUseMarkdown(name, undefined, json, "json");
+      anthropicContent.push({
+        type: "tool_use",
+        name,
+        input: parsePartialJSONValue(b.partialJSON),
+      });
     } else {
       const raw = {
         ...b.raw,
@@ -943,8 +957,10 @@ export function extractResponseStream(text: string): StreamExtraction {
         ...(b.partialJSON ? { partial_json: b.partialJSON } : {}),
       };
       appendResponseMarkdown(out, typedItemMarkdown(raw, b.type));
+      anthropicContent.push(raw);
     }
   }
+  if (anthropicContent.length > 0) out.rawContent = anthropicContent;
 
   // Flush OpenAI Responses output items in arrival order.
   const responseItems: Array<{ order: number; markdown: string }> = [];
@@ -1019,7 +1035,7 @@ function synthesizedAssistantResponse(extraction: StreamExtraction): Record<stri
   const thinking = extraction.thinking.trim();
   return {
     role: "assistant",
-    content,
+    content: extraction.rawContent ?? content,
     output: synthesizedResponseOutput(extraction),
     ...(thinking ? { thinking } : {}),
     ...(extraction.hiddenType ? { hidden_type: extraction.hiddenType } : {}),
@@ -1038,6 +1054,16 @@ function formatPartialJSON(raw: string): string {
     return JSON.stringify(JSON.parse(t), null, 2);
   } catch {
     return raw;
+  }
+}
+
+function parsePartialJSONValue(raw: string): unknown {
+  const t = raw.trim();
+  if (!t) return {};
+  try {
+    return JSON.parse(t);
+  } catch {
+    return t;
   }
 }
 

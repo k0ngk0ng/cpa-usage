@@ -887,6 +887,7 @@ function ChatView({ turns }: { turns: Turn[] }) {
         const rawExpanded = rawText != null && expandedRaw.has(index);
         const hasActions = isTool || rawText != null;
         const bubbleClass = isTool ? "chat-bubble-tool" : chatBubbleClass(turn.role);
+        const parts = rawExpanded || collapsed ? null : visualContentParts(turn);
         return (
           <div
             key={index}
@@ -925,17 +926,16 @@ function ChatView({ turns }: { turns: Turn[] }) {
                 <pre className="chat-raw-json">{rawText}</pre>
               ) : collapsed ? (
                 <div className="chat-preview">{chatPreview(turn)}</div>
+              ) : parts ? (
+                <>
+                  <StructuredContentParts parts={parts} fallbackText={turnText(turn)} />
+                  {turn.attachments?.length ? (
+                    <div className="chat-attachments">attachments: {turn.attachments.join("; ")}</div>
+                  ) : null}
+                </>
               ) : (
                 <>
-                  <div className="chat-body prose-md">
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      urlTransform={markdownUrlTransform}
-                      components={{ strong: MarkdownStrong }}
-                    >
-                      {turnText(turn)}
-                    </ReactMarkdown>
-                  </div>
+                  <MarkdownContent text={turnText(turn)} className="chat-body prose-md" />
                   {turn.attachments?.length ? (
                     <div className="chat-attachments">attachments: {turn.attachments.join("; ")}</div>
                   ) : null}
@@ -947,6 +947,231 @@ function ChatView({ turns }: { turns: Turn[] }) {
       })}
     </div>
   );
+}
+
+function MarkdownContent({ text, className }: { text: string; className: string }) {
+  return (
+    <div className={className}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        urlTransform={markdownUrlTransform}
+        components={{ strong: MarkdownStrong }}
+      >
+        {text}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+function StructuredContentParts({
+  parts,
+  fallbackText,
+}: {
+  parts: Record<string, unknown>[];
+  fallbackText: string;
+}) {
+  return (
+    <div className="chat-parts">
+      {parts.map((part, index) => (
+        <StructuredContentPart key={index} part={part} index={index} />
+      ))}
+      {parts.length === 0 && <MarkdownContent text={fallbackText} className="chat-body prose-md" />}
+    </div>
+  );
+}
+
+function StructuredContentPart({ part, index }: { part: Record<string, unknown>; index: number }) {
+  const type = stringRecordValue(part.type);
+  if (type === "text" || type === "input_text" || type === "output_text") {
+    const text = stringRecordValue(part.text);
+    return text ? <MarkdownContent text={text} className="chat-part-text prose-md" /> : null;
+  }
+  if (type === "thinking" || type === "reasoning") {
+    return <ThinkingPart part={part} type={type} />;
+  }
+  if (type === "redacted_thinking") {
+    return (
+      <div className="chat-hidden-part">
+        <span className="part-type-badge">redacted_thinking</span>
+        <span>Encrypted reasoning block</span>
+      </div>
+    );
+  }
+  if (type === "tool_use") {
+    return <ToolUsePart part={part} index={index} />;
+  }
+  if (type === "tool_result") {
+    return <ToolResultPart part={part} />;
+  }
+  return <GenericPart part={part} type={type || `part ${index + 1}`} />;
+}
+
+function ThinkingPart({ part, type }: { part: Record<string, unknown>; type: string }) {
+  const text = stringRecordValue(part.thinking) || stringRecordValue(part.text);
+  return (
+    <div className="thinking-part">
+      <div className="part-header">
+        <span className="part-type-badge">{type}</span>
+        {!text && <span className="part-muted">encrypted or redacted</span>}
+      </div>
+      {text ? <div className="thinking-text">{text}</div> : null}
+    </div>
+  );
+}
+
+function ToolUsePart({ part, index }: { part: Record<string, unknown>; index: number }) {
+  const name = stringRecordValue(part.name) || `tool_${index + 1}`;
+  const id = stringRecordValue(part.id) || stringRecordValue(part.tool_use_id) || stringRecordValue(part.call_id);
+  const input = part.input ?? {};
+  const questions = askUserQuestions(input);
+  return (
+    <div className="tool-use-card">
+      <div className="tool-use-header">
+        <div className="tool-use-title">
+          <span className="part-type-badge">tool_use</span>
+          <span className="tool-name">{name}</span>
+        </div>
+        {id && <span className="tool-id">{id}</span>}
+      </div>
+      {questions ? (
+        <AskUserQuestionView questions={questions} />
+      ) : (
+        <JsonValueBlock label="Input" value={input} />
+      )}
+    </div>
+  );
+}
+
+function ToolResultPart({ part }: { part: Record<string, unknown> }) {
+  const id = stringRecordValue(part.tool_use_id) || stringRecordValue(part.id) || stringRecordValue(part.call_id);
+  return (
+    <div className="tool-result-card">
+      <div className="tool-use-header">
+        <div className="tool-use-title">
+          <span className="part-type-badge">tool_result</span>
+          {id && <span className="tool-id">{id}</span>}
+        </div>
+      </div>
+      <ToolResultContent value={part.content} />
+    </div>
+  );
+}
+
+function ToolResultContent({ value }: { value: unknown }) {
+  if (typeof value === "string") {
+    return <pre className="tool-json-block">{value || "—"}</pre>;
+  }
+  if (Array.isArray(value)) {
+    const objectParts = value.filter(isRecord);
+    if (objectParts.length === value.length && objectParts.length > 0) {
+      return <StructuredContentParts parts={objectParts} fallbackText="" />;
+    }
+  }
+  return <JsonValueBlock label="Content" value={value ?? null} />;
+}
+
+interface VisualQuestion {
+  header: string;
+  question: string;
+  multiSelect: boolean;
+  options: VisualQuestionOption[];
+}
+
+interface VisualQuestionOption {
+  label: string;
+  description: string;
+}
+
+function AskUserQuestionView({ questions }: { questions: VisualQuestion[] }) {
+  return (
+    <div className="ask-user-questions">
+      {questions.map((q, index) => (
+        <div key={`${q.header}-${index}`} className="ask-question-card">
+          <div className="ask-question-meta">
+            {q.header && <span>{q.header}</span>}
+            <span>{q.multiSelect ? "multi select" : "single select"}</span>
+          </div>
+          <div className="ask-question-text">{q.question || "Question"}</div>
+          {q.options.length > 0 && (
+            <div className="ask-options">
+              {q.options.map((option, optionIndex) => (
+                <div key={`${option.label}-${optionIndex}`} className="ask-option">
+                  <div className="ask-option-label">{option.label || `Option ${optionIndex + 1}`}</div>
+                  {option.description && (
+                    <div className="ask-option-description">{option.description}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function GenericPart({ part, type }: { part: Record<string, unknown>; type: string }) {
+  return (
+    <div className="generic-part">
+      <div className="part-header">
+        <span className="part-type-badge">{type}</span>
+      </div>
+      <JsonValueBlock label="Payload" value={part} />
+    </div>
+  );
+}
+
+function JsonValueBlock({ label, value }: { label: string; value: unknown }) {
+  return (
+    <div className="tool-json-wrap">
+      <div className="tool-json-label">{label}</div>
+      <pre className="tool-json-block">{rawValueText(value)}</pre>
+    </div>
+  );
+}
+
+function visualContentParts(turn: Turn): Record<string, unknown>[] | null {
+  const raw = isRecord(turn.raw) ? turn.raw : null;
+  const content = raw?.content;
+  if (!Array.isArray(content)) return null;
+  const parts = content.filter(isRecord);
+  if (parts.length === 0) return null;
+  return parts.some((part) => !isPlainTextPart(part)) ? parts : null;
+}
+
+function isPlainTextPart(part: Record<string, unknown>): boolean {
+  const type = stringRecordValue(part.type);
+  return (type === "text" || type === "input_text" || type === "output_text") && typeof part.text === "string";
+}
+
+function askUserQuestions(input: unknown): VisualQuestion[] | null {
+  const obj = isRecord(input) ? input : null;
+  const rawQuestions = obj?.questions;
+  if (!Array.isArray(rawQuestions)) return null;
+  const questions = rawQuestions.filter(isRecord).map((q): VisualQuestion => {
+    const rawOptions = q.options;
+    const options = Array.isArray(rawOptions)
+      ? rawOptions.filter(isRecord).map((option) => ({
+          label: stringRecordValue(option.label),
+          description: stringRecordValue(option.description),
+        }))
+      : [];
+    return {
+      header: stringRecordValue(q.header),
+      question: stringRecordValue(q.question),
+      multiSelect: q.multiSelect === true || q.multi_select === true,
+      options,
+    };
+  });
+  return questions.length > 0 ? questions : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringRecordValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
 
 function turnRawText(turn: Turn): string | null {
