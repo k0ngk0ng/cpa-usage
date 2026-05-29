@@ -49,11 +49,13 @@ type DetailPayload struct {
 
 // TokensPayload mirrors the legacy `TokenStats` JSON.
 type TokensPayload struct {
-	InputTokens     int64 `json:"input_tokens"`
-	OutputTokens    int64 `json:"output_tokens"`
-	ReasoningTokens int64 `json:"reasoning_tokens"`
-	CachedTokens    int64 `json:"cached_tokens"`
-	TotalTokens     int64 `json:"total_tokens"`
+	InputTokens         int64 `json:"input_tokens"`
+	OutputTokens        int64 `json:"output_tokens"`
+	ReasoningTokens     int64 `json:"reasoning_tokens"`
+	CachedTokens        int64 `json:"cached_tokens"`
+	CacheReadTokens     int64 `json:"cache_read_tokens"`
+	CacheCreationTokens int64 `json:"cache_creation_tokens"`
+	TotalTokens         int64 `json:"total_tokens"`
 }
 
 // DecodeSnapshot parses the legacy export envelope from raw JSON bytes.
@@ -92,21 +94,23 @@ func SnapshotToEvents(env *SnapshotEnvelope) []storage.UsageEvent {
 					continue
 				}
 				ev := storage.UsageEvent{
-					EventKey:        snapshotEventKey(apiKey, model, d),
-					Timestamp:       ts.UTC(),
-					Model:           strings.TrimSpace(model),
-					APIGroupKey:     resolveAPIGroup(apiKey),
-					APIKey:          strings.TrimSpace(apiKey),
-					Source:          strings.TrimSpace(d.Source),
-					AuthIndex:       strings.TrimSpace(d.AuthIndex),
-					LatencyMs:       d.LatencyMs,
-					InputTokens:     d.Tokens.InputTokens,
-					OutputTokens:    d.Tokens.OutputTokens,
-					ReasoningTokens: d.Tokens.ReasoningTokens,
-					CachedTokens:    d.Tokens.CachedTokens,
-					TotalTokens:     d.Tokens.TotalTokens,
-					Failed:          d.Failed,
-					InsertedAt:      now,
+					EventKey:            snapshotEventKey(apiKey, model, d),
+					Timestamp:           ts.UTC(),
+					Model:               strings.TrimSpace(model),
+					APIGroupKey:         resolveAPIGroup(apiKey),
+					APIKey:              strings.TrimSpace(apiKey),
+					Source:              strings.TrimSpace(d.Source),
+					AuthIndex:           strings.TrimSpace(d.AuthIndex),
+					LatencyMs:           d.LatencyMs,
+					InputTokens:         d.Tokens.InputTokens,
+					OutputTokens:        d.Tokens.OutputTokens,
+					ReasoningTokens:     d.Tokens.ReasoningTokens,
+					CachedTokens:        d.Tokens.CachedTokens,
+					CacheReadTokens:     d.Tokens.CacheReadTokens,
+					CacheCreationTokens: d.Tokens.CacheCreationTokens,
+					TotalTokens:         d.Tokens.TotalTokens,
+					Failed:              d.Failed,
+					InsertedAt:          now,
 				}
 				out = append(out, ev)
 			}

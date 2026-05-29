@@ -440,6 +440,7 @@ function eventRecordMap(event: UsageEventRecord): Record<string, string> {
     timestamp: displayValue(formatTimestamp(event.timestamp)),
     provider: displayValue(event.provider),
     model: displayValue(event.model),
+    alias: displayValue(event.alias),
     api_group_key: displayValue(event.api_group_key),
     api_group_display: displayValue(event.api_group_display),
     source: displayValue(event.source),
@@ -449,14 +450,27 @@ function eventRecordMap(event: UsageEventRecord): Record<string, string> {
     endpoint: displayValue(event.endpoint),
     request_id: displayValue(event.request_id),
     latency_ms: displayValue(`${event.latency_ms} (${formatLatency(event.latency_ms)})`),
+    ttft_ms: displayValue(`${event.ttft_ms} (${formatLatency(event.ttft_ms)})`),
     input_tokens: formatNumber(event.input_tokens),
     cached_tokens: formatNumber(event.cached_tokens),
+    cache_read_tokens: formatNumber(event.cache_read_tokens),
+    cache_creation_tokens: formatNumber(event.cache_creation_tokens),
     output_tokens: formatNumber(event.output_tokens),
     reasoning_tokens: formatNumber(event.reasoning_tokens),
     total_tokens: formatNumber(event.total_tokens),
     failed: event.failed ? "true" : "false",
+    fail_status_code: event.fail_status_code ? String(event.fail_status_code) : "—",
+    fail_body: displayValue(event.fail_body),
+    response_headers: formatHeaders(event.response_headers),
+    reasoning_effort: displayValue(event.reasoning_effort),
+    service_tier: displayValue(event.service_tier),
     cost: formatCost(event.cost),
   };
+}
+
+function formatHeaders(headers: Record<string, string[]> | undefined): string {
+  if (!headers || !Object.keys(headers).length) return "—";
+  return JSON.stringify(headers);
 }
 
 function displayValue(value: string | undefined | null): string {

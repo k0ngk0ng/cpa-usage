@@ -127,7 +127,18 @@ export default function EventsPage() {
         />
       ),
     },
-    { header: "Model", cellClassName: "font-mono whitespace-nowrap", cell: (r) => r.model },
+    {
+      header: "Model",
+      cellClassName: "font-mono whitespace-nowrap",
+      cell: (r) => (
+        <div>
+          <div>{r.model}</div>
+          {r.alias && r.alias !== r.model && (
+            <div className="text-[10px] text-muted">{r.alias}</div>
+          )}
+        </div>
+      ),
+    },
     {
       header: "API",
       cellClassName: "max-w-[14rem]",
@@ -160,14 +171,25 @@ export default function EventsPage() {
         </span>
       ),
     },
-    { header: "Latency", align: "right", cellClassName: "whitespace-nowrap", cell: (r) => formatLatency(r.latency_ms) },
+    {
+      header: "Latency",
+      align: "right",
+      cellClassName: "whitespace-nowrap",
+      cell: (r) => (
+        <div title={r.ttft_ms ? `TTFT ${formatLatency(r.ttft_ms)}` : ""}>
+          <div>{formatLatency(r.latency_ms)}</div>
+          {r.ttft_ms > 0 && <div className="text-[10px] text-muted">TTFT {formatLatency(r.ttft_ms)}</div>}
+        </div>
+      ),
+    },
     { header: "New", align: "right", cellClassName: "whitespace-nowrap", cell: (r) => formatNumber(r.input_tokens) },
-    { header: "Cache Hit", align: "right", cellClassName: "whitespace-nowrap", cell: (r) => formatNumber(r.cached_tokens) },
+    { header: "Cache Read", align: "right", cellClassName: "whitespace-nowrap", cell: (r) => formatNumber(r.cached_tokens) },
+    { header: "Cache Write", align: "right", cellClassName: "whitespace-nowrap", cell: (r) => formatNumber(r.cache_creation_tokens) },
     {
       header: "Input",
       align: "right",
       cellClassName: "whitespace-nowrap font-medium",
-      cell: (r) => formatNumber(r.input_tokens + r.cached_tokens),
+      cell: (r) => formatNumber(r.input_tokens + r.cached_tokens + r.cache_creation_tokens),
     },
     { header: "Output", align: "right", cellClassName: "whitespace-nowrap", cell: (r) => formatNumber(r.output_tokens) },
     { header: "Reasoning", align: "right", cellClassName: "whitespace-nowrap", cell: (r) => formatNumber(r.reasoning_tokens) },

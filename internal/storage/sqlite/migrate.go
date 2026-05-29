@@ -4,26 +4,35 @@ import "time"
 
 // usageEventModel is the GORM/sqlite-side schema. Rows are deduplicated on event_key.
 type usageEventModel struct {
-	ID              uint      `gorm:"primaryKey"`
-	EventKey        string    `gorm:"uniqueIndex;size:128"`
-	Timestamp       time.Time `gorm:"index"`
-	Provider        string    `gorm:"size:64;index"`
-	Model           string    `gorm:"size:128;index"`
-	APIGroupKey     string    `gorm:"size:128;index;column:api_group_key"`
-	Source          string    `gorm:"size:256;index"`
-	AuthIndex       string    `gorm:"size:64;index"`
-	AuthType        string    `gorm:"size:32"`
-	APIKey          string    `gorm:"size:128;column:api_key"`
-	Endpoint        string    `gorm:"size:128"`
-	RequestID       string    `gorm:"size:64;column:request_id;index"`
-	LatencyMs       int64
-	InputTokens     int64
-	OutputTokens    int64
-	ReasoningTokens int64
-	CachedTokens    int64
-	TotalTokens     int64
-	Failed          bool `gorm:"index"`
-	InsertedAt      time.Time
+	ID                  uint      `gorm:"primaryKey"`
+	EventKey            string    `gorm:"uniqueIndex;size:128"`
+	Timestamp           time.Time `gorm:"index"`
+	Provider            string    `gorm:"size:64;index"`
+	Model               string    `gorm:"size:128;index"`
+	Alias               string    `gorm:"size:128"`
+	APIGroupKey         string    `gorm:"size:128;index;column:api_group_key"`
+	Source              string    `gorm:"size:256;index"`
+	AuthIndex           string    `gorm:"size:64;index"`
+	AuthType            string    `gorm:"size:32"`
+	APIKey              string    `gorm:"size:128;column:api_key"`
+	Endpoint            string    `gorm:"size:128"`
+	RequestID           string    `gorm:"size:64;column:request_id;index"`
+	LatencyMs           int64
+	TTFTMs              int64 `gorm:"column:ttft_ms"`
+	InputTokens         int64
+	OutputTokens        int64
+	ReasoningTokens     int64
+	CachedTokens        int64
+	CacheReadTokens     int64
+	CacheCreationTokens int64
+	TotalTokens         int64
+	Failed              bool `gorm:"index"`
+	FailStatusCode      int
+	FailBody            string
+	ResponseHeaders     string
+	ReasoningEffort     string `gorm:"size:64"`
+	ServiceTier         string `gorm:"size:64"`
+	InsertedAt          time.Time
 }
 
 func (usageEventModel) TableName() string { return "usage_events" }

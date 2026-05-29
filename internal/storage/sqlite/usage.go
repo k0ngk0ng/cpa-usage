@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sort"
 	"strings"
@@ -32,25 +33,34 @@ func (s *Store) InsertUsageEvents(ctx context.Context, events []storage.UsageEve
 			insertedAt = now
 		}
 		rows = append(rows, usageEventModel{
-			EventKey:        e.EventKey,
-			Timestamp:       e.Timestamp.UTC(),
-			Provider:        e.Provider,
-			Model:           e.Model,
-			APIGroupKey:     e.APIGroupKey,
-			Source:          e.Source,
-			AuthIndex:       e.AuthIndex,
-			AuthType:        e.AuthType,
-			APIKey:          e.APIKey,
-			Endpoint:        e.Endpoint,
-			RequestID:       e.RequestID,
-			LatencyMs:       e.LatencyMs,
-			InputTokens:     e.InputTokens,
-			OutputTokens:    e.OutputTokens,
-			ReasoningTokens: e.ReasoningTokens,
-			CachedTokens:    e.CachedTokens,
-			TotalTokens:     e.TotalTokens,
-			Failed:          e.Failed,
-			InsertedAt:      insertedAt,
+			EventKey:            e.EventKey,
+			Timestamp:           e.Timestamp.UTC(),
+			Provider:            e.Provider,
+			Model:               e.Model,
+			Alias:               e.Alias,
+			APIGroupKey:         e.APIGroupKey,
+			Source:              e.Source,
+			AuthIndex:           e.AuthIndex,
+			AuthType:            e.AuthType,
+			APIKey:              e.APIKey,
+			Endpoint:            e.Endpoint,
+			RequestID:           e.RequestID,
+			LatencyMs:           e.LatencyMs,
+			TTFTMs:              e.TTFTMs,
+			InputTokens:         e.InputTokens,
+			OutputTokens:        e.OutputTokens,
+			ReasoningTokens:     e.ReasoningTokens,
+			CachedTokens:        e.CachedTokens,
+			CacheReadTokens:     e.CacheReadTokens,
+			CacheCreationTokens: e.CacheCreationTokens,
+			TotalTokens:         e.TotalTokens,
+			Failed:              e.Failed,
+			FailStatusCode:      e.FailStatusCode,
+			FailBody:            e.FailBody,
+			ResponseHeaders:     e.ResponseHeaders,
+			ReasoningEffort:     e.ReasoningEffort,
+			ServiceTier:         e.ServiceTier,
+			InsertedAt:          insertedAt,
 		})
 	}
 	if len(rows) == 0 {
@@ -200,6 +210,14 @@ func computeCost(model string, input, completion, cached int64, prices map[strin
 	return cost
 }
 
+func rawJSON(value string) json.RawMessage {
+	value = strings.TrimSpace(value)
+	if value == "" || !json.Valid([]byte(value)) {
+		return nil
+	}
+	return json.RawMessage(value)
+}
+
 // ListUsageEvents returns paginated raw events.
 func (s *Store) ListUsageEvents(ctx context.Context, f storage.UsageFilter, p storage.Page, prices map[string]storage.ModelPriceSetting) (*storage.UsageEventsPage, error) {
 	if p.Page <= 0 {
@@ -226,24 +244,33 @@ func (s *Store) ListUsageEvents(ctx context.Context, f storage.UsageFilter, p st
 	items := make([]storage.UsageEventRecord, 0, len(rows))
 	for _, r := range rows {
 		items = append(items, storage.UsageEventRecord{
-			EventKey:        r.EventKey,
-			Timestamp:       r.Timestamp,
-			Provider:        r.Provider,
-			Model:           r.Model,
-			APIGroupKey:     r.APIGroupKey,
-			Source:          r.Source,
-			AuthIndex:       r.AuthIndex,
-			AuthType:        r.AuthType,
-			Endpoint:        r.Endpoint,
-			RequestID:       r.RequestID,
-			LatencyMs:       r.LatencyMs,
-			InputTokens:     r.InputTokens,
-			OutputTokens:    r.OutputTokens,
-			ReasoningTokens: r.ReasoningTokens,
-			CachedTokens:    r.CachedTokens,
-			TotalTokens:     r.TotalTokens,
-			Failed:          r.Failed,
-			Cost:            computeCost(r.Model, r.InputTokens, r.OutputTokens, r.CachedTokens, prices),
+			EventKey:            r.EventKey,
+			Timestamp:           r.Timestamp,
+			Provider:            r.Provider,
+			Model:               r.Model,
+			Alias:               r.Alias,
+			APIGroupKey:         r.APIGroupKey,
+			Source:              r.Source,
+			AuthIndex:           r.AuthIndex,
+			AuthType:            r.AuthType,
+			Endpoint:            r.Endpoint,
+			RequestID:           r.RequestID,
+			LatencyMs:           r.LatencyMs,
+			TTFTMs:              r.TTFTMs,
+			InputTokens:         r.InputTokens,
+			OutputTokens:        r.OutputTokens,
+			ReasoningTokens:     r.ReasoningTokens,
+			CachedTokens:        r.CachedTokens,
+			CacheReadTokens:     r.CacheReadTokens,
+			CacheCreationTokens: r.CacheCreationTokens,
+			TotalTokens:         r.TotalTokens,
+			Failed:              r.Failed,
+			FailStatusCode:      r.FailStatusCode,
+			FailBody:            r.FailBody,
+			ResponseHeaders:     rawJSON(r.ResponseHeaders),
+			ReasoningEffort:     r.ReasoningEffort,
+			ServiceTier:         r.ServiceTier,
+			Cost:                computeCost(r.Model, r.InputTokens, r.OutputTokens, r.CachedTokens, prices),
 		})
 	}
 	totalPages := int((total + int64(p.PageSize) - 1) / int64(p.PageSize))
@@ -334,16 +361,18 @@ func (s *Store) ListUsageCredentialStats(ctx context.Context, f storage.UsageFil
 // ListUsageAnalysis returns three aggregate slices: by API group, by model, and combined.
 func (s *Store) ListUsageAnalysis(ctx context.Context, f storage.UsageFilter, prices map[string]storage.ModelPriceSetting) (*storage.UsageAnalysis, error) {
 	type aggRow struct {
-		APIGroupKey     string
-		Model           string
-		Total           int64
-		Success         int64
-		Failed          int64
-		InputTokens     int64
-		OutputTokens    int64
-		ReasoningTokens int64
-		CachedTokens    int64
-		TotalTokens     int64
+		APIGroupKey         string
+		Model               string
+		Total               int64
+		Success             int64
+		Failed              int64
+		InputTokens         int64
+		OutputTokens        int64
+		ReasoningTokens     int64
+		CachedTokens        int64
+		CacheReadTokens     int64
+		CacheCreationTokens int64
+		TotalTokens         int64
 	}
 	selectExpr := `api_group_key, model,
 		COUNT(*) AS total,
@@ -353,6 +382,8 @@ func (s *Store) ListUsageAnalysis(ctx context.Context, f storage.UsageFilter, pr
 		SUM(output_tokens) AS output_tokens,
 		SUM(reasoning_tokens) AS reasoning_tokens,
 		SUM(cached_tokens) AS cached_tokens,
+		SUM(cache_read_tokens) AS cache_read_tokens,
+		SUM(cache_creation_tokens) AS cache_creation_tokens,
 		SUM(total_tokens) AS total_tokens`
 	var rows []aggRow
 	if err := s.applyFilter(ctx, f).
@@ -366,17 +397,19 @@ func (s *Store) ListUsageAnalysis(ctx context.Context, f storage.UsageFilter, pr
 	modelAgg := make(map[string]*storage.UsageAggregationRow)
 	for _, r := range rows {
 		row := storage.UsageAggregationRow{
-			APIGroupKey:     r.APIGroupKey,
-			Model:           r.Model,
-			Total:           r.Total,
-			Success:         r.Success,
-			Failed:          r.Failed,
-			InputTokens:     r.InputTokens,
-			OutputTokens:    r.OutputTokens,
-			ReasoningTokens: r.ReasoningTokens,
-			CachedTokens:    r.CachedTokens,
-			TotalTokens:     r.TotalTokens,
-			Cost:            costFromTotals(r.Model, r.InputTokens, r.OutputTokens, r.CachedTokens, prices),
+			APIGroupKey:         r.APIGroupKey,
+			Model:               r.Model,
+			Total:               r.Total,
+			Success:             r.Success,
+			Failed:              r.Failed,
+			InputTokens:         r.InputTokens,
+			OutputTokens:        r.OutputTokens,
+			ReasoningTokens:     r.ReasoningTokens,
+			CachedTokens:        r.CachedTokens,
+			CacheReadTokens:     r.CacheReadTokens,
+			CacheCreationTokens: r.CacheCreationTokens,
+			TotalTokens:         r.TotalTokens,
+			Cost:                costFromTotals(r.Model, r.InputTokens, r.OutputTokens, r.CachedTokens, prices),
 		}
 		out.ByAPIAndModel = append(out.ByAPIAndModel, row)
 
@@ -415,6 +448,8 @@ func mergeAgg(dst *storage.UsageAggregationRow, src storage.UsageAggregationRow)
 	dst.OutputTokens += src.OutputTokens
 	dst.ReasoningTokens += src.ReasoningTokens
 	dst.CachedTokens += src.CachedTokens
+	dst.CacheReadTokens += src.CacheReadTokens
+	dst.CacheCreationTokens += src.CacheCreationTokens
 	dst.TotalTokens += src.TotalTokens
 	dst.Cost += src.Cost
 }
@@ -441,14 +476,16 @@ func (s *Store) BuildUsageOverview(ctx context.Context, f storage.UsageFilter, p
 
 	// Summary aggregation
 	type sumRow struct {
-		Total           int64
-		Success         int64
-		Failed          int64
-		InputTokens     int64
-		OutputTokens    int64
-		ReasoningTokens int64
-		CachedTokens    int64
-		TotalTokens     int64
+		Total               int64
+		Success             int64
+		Failed              int64
+		InputTokens         int64
+		OutputTokens        int64
+		ReasoningTokens     int64
+		CachedTokens        int64
+		CacheReadTokens     int64
+		CacheCreationTokens int64
+		TotalTokens         int64
 	}
 	var sumRowResult sumRow
 	if err := s.applyFilter(ctx, f).
@@ -459,6 +496,8 @@ func (s *Store) BuildUsageOverview(ctx context.Context, f storage.UsageFilter, p
 			SUM(output_tokens) AS output_tokens,
 			SUM(reasoning_tokens) AS reasoning_tokens,
 			SUM(cached_tokens) AS cached_tokens,
+			SUM(cache_read_tokens) AS cache_read_tokens,
+			SUM(cache_creation_tokens) AS cache_creation_tokens,
 			SUM(total_tokens) AS total_tokens`).
 		Scan(&sumRowResult).Error; err != nil {
 		return nil, err
@@ -499,15 +538,17 @@ func (s *Store) BuildUsageOverview(ctx context.Context, f storage.UsageFilter, p
 
 	return &storage.UsageOverview{
 		Summary: storage.UsageSummary{
-			Total:           sumRowResult.Total,
-			Success:         sumRowResult.Success,
-			Failed:          sumRowResult.Failed,
-			InputTokens:     sumRowResult.InputTokens,
-			OutputTokens:    sumRowResult.OutputTokens,
-			ReasoningTokens: sumRowResult.ReasoningTokens,
-			CachedTokens:    sumRowResult.CachedTokens,
-			TotalTokens:     sumRowResult.TotalTokens,
-			Cost:            cost,
+			Total:               sumRowResult.Total,
+			Success:             sumRowResult.Success,
+			Failed:              sumRowResult.Failed,
+			InputTokens:         sumRowResult.InputTokens,
+			OutputTokens:        sumRowResult.OutputTokens,
+			ReasoningTokens:     sumRowResult.ReasoningTokens,
+			CachedTokens:        sumRowResult.CachedTokens,
+			CacheReadTokens:     sumRowResult.CacheReadTokens,
+			CacheCreationTokens: sumRowResult.CacheCreationTokens,
+			TotalTokens:         sumRowResult.TotalTokens,
+			Cost:                cost,
 		},
 		HourlySeries: hourly,
 		DailySeries:  daily,
@@ -518,16 +559,18 @@ func (s *Store) BuildUsageOverview(ctx context.Context, f storage.UsageFilter, p
 
 // bucketRow is one (bucket, model) aggregate read from a strftime GROUP BY.
 type bucketRow struct {
-	Bucket          string
-	Model           string
-	Total           int64
-	Success         int64
-	Failed          int64
-	InputTokens     int64
-	OutputTokens    int64
-	ReasoningTokens int64
-	CachedTokens    int64
-	TotalTokens     int64
+	Bucket              string
+	Model               string
+	Total               int64
+	Success             int64
+	Failed              int64
+	InputTokens         int64
+	OutputTokens        int64
+	ReasoningTokens     int64
+	CachedTokens        int64
+	CacheReadTokens     int64
+	CacheCreationTokens int64
+	TotalTokens         int64
 }
 
 func (s *Store) bucketSeriesHourly(ctx context.Context, f storage.UsageFilter, now time.Time, prices map[string]storage.ModelPriceSetting) ([]storage.UsageBucket, error) {
@@ -547,6 +590,8 @@ func (s *Store) bucketSeriesHourly(ctx context.Context, f storage.UsageFilter, n
 			SUM(output_tokens) AS output_tokens,
 			SUM(reasoning_tokens) AS reasoning_tokens,
 			SUM(cached_tokens) AS cached_tokens,
+			SUM(cache_read_tokens) AS cache_read_tokens,
+			SUM(cache_creation_tokens) AS cache_creation_tokens,
 			SUM(total_tokens) AS total_tokens`).
 		Group("bucket, model").
 		Scan(&rows).Error; err != nil {
@@ -573,6 +618,8 @@ func (s *Store) bucketSeriesDaily(ctx context.Context, f storage.UsageFilter, no
 			SUM(output_tokens) AS output_tokens,
 			SUM(reasoning_tokens) AS reasoning_tokens,
 			SUM(cached_tokens) AS cached_tokens,
+			SUM(cache_read_tokens) AS cache_read_tokens,
+			SUM(cache_creation_tokens) AS cache_creation_tokens,
 			SUM(total_tokens) AS total_tokens`).
 		Group("bucket, model").
 		Scan(&rows).Error; err != nil {
@@ -770,6 +817,8 @@ func foldBuckets(rows []bucketRow, start, end time.Time, step time.Duration, pri
 		b.OutputTokens += r.OutputTokens
 		b.ReasoningTokens += r.ReasoningTokens
 		b.CachedTokens += r.CachedTokens
+		b.CacheReadTokens += r.CacheReadTokens
+		b.CacheCreationTokens += r.CacheCreationTokens
 		b.TotalTokens += r.TotalTokens
 		b.Cost += computeCost(r.Model, r.InputTokens, r.OutputTokens, r.CachedTokens, prices)
 	}
@@ -804,6 +853,8 @@ func foldBucketsDaily(rows []bucketRow, start, end time.Time, prices map[string]
 		b.OutputTokens += r.OutputTokens
 		b.ReasoningTokens += r.ReasoningTokens
 		b.CachedTokens += r.CachedTokens
+		b.CacheReadTokens += r.CacheReadTokens
+		b.CacheCreationTokens += r.CacheCreationTokens
 		b.TotalTokens += r.TotalTokens
 		b.Cost += computeCost(r.Model, r.InputTokens, r.OutputTokens, r.CachedTokens, prices)
 	}

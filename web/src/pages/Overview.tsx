@@ -102,10 +102,14 @@ export default function Overview() {
         />
         <MetricCard
           label="Input"
-          value={formatTokens((summary?.input_tokens ?? 0) + (summary?.cached_tokens ?? 0))}
+          value={formatTokens(
+            (summary?.input_tokens ?? 0) +
+              (summary?.cached_tokens ?? 0) +
+              (summary?.cache_creation_tokens ?? 0),
+          )}
           hint={
             summary
-              ? `${formatTokens(summary.input_tokens)} new · ${formatTokens(summary.cached_tokens)} cache hit`
+              ? `${formatTokens(summary.input_tokens)} new · ${formatTokens(summary.cached_tokens)} cache read · ${formatTokens(summary.cache_creation_tokens)} cache write`
               : "—"
           }
         />

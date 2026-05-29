@@ -8,21 +8,21 @@ import (
 
 // Endpoints used against the CPA management API.
 const (
-	managementAuthFilesEndpoint     = "/v0/management/auth-files"
-	managementExternalKeysEndpoint  = "/v0/management/api-keys"
-	managementGeminiKeysEndpoint    = "/v0/management/gemini-api-key"
-	managementClaudeKeysEndpoint    = "/v0/management/claude-api-key"
-	managementCodexKeysEndpoint     = "/v0/management/codex-api-key"
-	managementVertexKeysEndpoint    = "/v0/management/vertex-api-key"
-	managementOpenAICompatEndpoint  = "/v0/management/openai-compatibility"
-	modelsEndpoint                  = "/v1/models"
+	managementAuthFilesEndpoint    = "/v0/management/auth-files"
+	managementExternalKeysEndpoint = "/v0/management/api-keys"
+	managementGeminiKeysEndpoint   = "/v0/management/gemini-api-key"
+	managementClaudeKeysEndpoint   = "/v0/management/claude-api-key"
+	managementCodexKeysEndpoint    = "/v0/management/codex-api-key"
+	managementVertexKeysEndpoint   = "/v0/management/vertex-api-key"
+	managementOpenAICompatEndpoint = "/v0/management/openai-compatibility"
+	modelsEndpoint                 = "/v1/models"
 
 	// Redis queue (RESP TCP) constants — multiplexed on CPA's HTTP port + 1 by default (8317).
-	redisNetwork              = "tcp"
-	RedisDefaultPort          = "8317"
-	RedisAuthCommand          = "AUTH"
-	RedisLPopCommand          = "LPOP"
-	RedisUsageQueueKey        = "queue"
+	redisNetwork       = "tcp"
+	RedisDefaultPort   = "8317"
+	RedisAuthCommand   = "AUTH"
+	RedisLPopCommand   = "LPOP"
+	RedisUsageQueueKey = "queue"
 )
 
 // AuthFile mirrors a single entry from /v0/management/auth-files.
@@ -181,25 +181,39 @@ func firstString(raw map[string]any, keys ...string) string {
 // CPA encodes timestamps as RFC3339 strings; deserialization tolerates both string
 // and object container shapes via Tokens.
 type UsageRecord struct {
-	Timestamp time.Time     `json:"timestamp"`
-	LatencyMs int64         `json:"latency_ms"`
-	Source    string        `json:"source"`
-	AuthIndex string        `json:"auth_index"`
-	Tokens    UsageTokens   `json:"tokens"`
-	Failed    bool          `json:"failed"`
-	Provider  string        `json:"provider"`
-	Model     string        `json:"model"`
-	Endpoint  string        `json:"endpoint"`
-	AuthType  string        `json:"auth_type"`
-	APIKey    string        `json:"api_key"`
-	RequestID string        `json:"request_id"`
+	Timestamp       time.Time       `json:"timestamp"`
+	LatencyMs       int64           `json:"latency_ms"`
+	TTFTMs          int64           `json:"ttft_ms"`
+	Source          string          `json:"source"`
+	AuthIndex       string          `json:"auth_index"`
+	Tokens          UsageTokens     `json:"tokens"`
+	Failed          bool            `json:"failed"`
+	Fail            UsageFail       `json:"fail"`
+	ResponseHeaders json.RawMessage `json:"response_headers"`
+	Provider        string          `json:"provider"`
+	Model           string          `json:"model"`
+	Alias           string          `json:"alias"`
+	Endpoint        string          `json:"endpoint"`
+	AuthType        string          `json:"auth_type"`
+	APIKey          string          `json:"api_key"`
+	RequestID       string          `json:"request_id"`
+	ReasoningEffort string          `json:"reasoning_effort"`
+	ServiceTier     string          `json:"service_tier"`
 }
 
 // UsageTokens is the nested token stats object from CPA.
 type UsageTokens struct {
-	InputTokens     int64 `json:"input_tokens"`
-	OutputTokens    int64 `json:"output_tokens"`
-	ReasoningTokens int64 `json:"reasoning_tokens"`
-	CachedTokens    int64 `json:"cached_tokens"`
-	TotalTokens     int64 `json:"total_tokens"`
+	InputTokens         int64 `json:"input_tokens"`
+	OutputTokens        int64 `json:"output_tokens"`
+	ReasoningTokens     int64 `json:"reasoning_tokens"`
+	CachedTokens        int64 `json:"cached_tokens"`
+	CacheReadTokens     int64 `json:"cache_read_tokens"`
+	CacheCreationTokens int64 `json:"cache_creation_tokens"`
+	TotalTokens         int64 `json:"total_tokens"`
+}
+
+// UsageFail is the nested failure detail object from CPA.
+type UsageFail struct {
+	StatusCode int    `json:"status_code"`
+	Body       string `json:"body"`
 }

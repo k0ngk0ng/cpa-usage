@@ -46,6 +46,8 @@ export interface UsageSummary {
   output_tokens: number;
   reasoning_tokens: number;
   cached_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
   total_tokens: number;
   cost: number;
 }
@@ -59,6 +61,8 @@ export interface UsageBucket {
   output_tokens: number;
   reasoning_tokens: number;
   cached_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
   total_tokens: number;
   cost: number;
 }
@@ -104,6 +108,7 @@ export interface UsageEventRecord {
   timestamp: string;
   provider: string;
   model: string;
+  alias: string;
   api_group_key: string;
   api_group_display: string;
   source: string;
@@ -113,12 +118,20 @@ export interface UsageEventRecord {
   endpoint: string;
   request_id: string;
   latency_ms: number;
+  ttft_ms: number;
   input_tokens: number;
   output_tokens: number;
   reasoning_tokens: number;
   cached_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
   total_tokens: number;
   failed: boolean;
+  fail_status_code: number;
+  fail_body: string;
+  response_headers?: Record<string, string[]>;
+  reasoning_effort: string;
+  service_tier: string;
   cost: number;
 }
 
@@ -161,6 +174,8 @@ export interface UsageAggregationRow {
   output_tokens: number;
   reasoning_tokens: number;
   cached_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
   total_tokens: number;
   cost: number;
 }

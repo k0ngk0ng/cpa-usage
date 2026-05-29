@@ -29,12 +29,15 @@ const numericColumns = (): Column<UsageAggregationRow>[] => [
   },
   { header: "Success rate", align: "right", cell: (r) => pct(r.success, r.total) },
   { header: "New", align: "right", cell: (r) => formatNumber(r.input_tokens) },
-  { header: "Cache Hit", align: "right", cell: (r) => formatNumber(r.cached_tokens) },
+  { header: "Cache Read", align: "right", cell: (r) => formatNumber(r.cached_tokens) },
+  { header: "Cache Write", align: "right", cell: (r) => formatNumber(r.cache_creation_tokens) },
   {
     header: "Input",
     align: "right",
     cell: (r) => (
-      <span className="font-medium">{formatNumber(r.input_tokens + r.cached_tokens)}</span>
+      <span className="font-medium">
+        {formatNumber(r.input_tokens + r.cached_tokens + r.cache_creation_tokens)}
+      </span>
     ),
   },
   { header: "Output", align: "right", cell: (r) => formatNumber(r.output_tokens) },

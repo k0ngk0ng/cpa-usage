@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -30,25 +31,34 @@ func Decode(message string) (storage.UsageEvent, error) {
 		ts = time.Now().UTC()
 	}
 	return storage.UsageEvent{
-		EventKey:        requestID,
-		Timestamp:       ts.UTC(),
-		Provider:        strings.TrimSpace(rec.Provider),
-		Model:           strings.TrimSpace(rec.Model),
-		APIGroupKey:     resolveAPIGroupKey(rec),
-		Source:          strings.TrimSpace(rec.Source),
-		AuthIndex:       strings.TrimSpace(rec.AuthIndex),
-		AuthType:        strings.TrimSpace(rec.AuthType),
-		APIKey:          strings.TrimSpace(rec.APIKey),
-		Endpoint:        strings.TrimSpace(rec.Endpoint),
-		RequestID:       requestID,
-		LatencyMs:       rec.LatencyMs,
-		InputTokens:     rec.Tokens.InputTokens,
-		OutputTokens:    rec.Tokens.OutputTokens,
-		ReasoningTokens: rec.Tokens.ReasoningTokens,
-		CachedTokens:    rec.Tokens.CachedTokens,
-		TotalTokens:     rec.Tokens.TotalTokens,
-		Failed:          rec.Failed,
-		InsertedAt:      time.Now().UTC(),
+		EventKey:            requestID,
+		Timestamp:           ts.UTC(),
+		Provider:            strings.TrimSpace(rec.Provider),
+		Model:               strings.TrimSpace(rec.Model),
+		Alias:               strings.TrimSpace(rec.Alias),
+		APIGroupKey:         resolveAPIGroupKey(rec),
+		Source:              strings.TrimSpace(rec.Source),
+		AuthIndex:           strings.TrimSpace(rec.AuthIndex),
+		AuthType:            strings.TrimSpace(rec.AuthType),
+		APIKey:              strings.TrimSpace(rec.APIKey),
+		Endpoint:            strings.TrimSpace(rec.Endpoint),
+		RequestID:           requestID,
+		LatencyMs:           rec.LatencyMs,
+		TTFTMs:              rec.TTFTMs,
+		InputTokens:         rec.Tokens.InputTokens,
+		OutputTokens:        rec.Tokens.OutputTokens,
+		ReasoningTokens:     rec.Tokens.ReasoningTokens,
+		CachedTokens:        rec.Tokens.CachedTokens,
+		CacheReadTokens:     rec.Tokens.CacheReadTokens,
+		CacheCreationTokens: rec.Tokens.CacheCreationTokens,
+		TotalTokens:         rec.Tokens.TotalTokens,
+		Failed:              rec.Failed,
+		FailStatusCode:      rec.Fail.StatusCode,
+		FailBody:            strings.TrimSpace(rec.Fail.Body),
+		ResponseHeaders:     compactRawJSON(rec.ResponseHeaders),
+		ReasoningEffort:     strings.TrimSpace(rec.ReasoningEffort),
+		ServiceTier:         strings.TrimSpace(rec.ServiceTier),
+		InsertedAt:          time.Now().UTC(),
 	}, nil
 }
 
@@ -82,4 +92,16 @@ func resolveAPIGroupKey(rec cpa.UsageRecord) string {
 		return v
 	}
 	return "unknown"
+}
+
+func compactRawJSON(raw json.RawMessage) string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) || !json.Valid(raw) {
+		return ""
+	}
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, raw); err != nil {
+		return ""
+	}
+	return buf.String()
 }

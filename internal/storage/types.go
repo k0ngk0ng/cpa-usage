@@ -1,28 +1,40 @@
 package storage
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // UsageEvent is one row decoded from the CPA redis usage queue.
 type UsageEvent struct {
-	EventKey        string // request_id from CPA payload, used as dedup key
-	Timestamp       time.Time
-	Provider        string
-	Model           string
-	APIGroupKey     string // api_key | provider | endpoint | "unknown"
-	Source          string
-	AuthIndex       string
-	AuthType        string
-	APIKey          string
-	Endpoint        string
-	RequestID       string
-	LatencyMs       int64
-	InputTokens     int64
-	OutputTokens    int64
-	ReasoningTokens int64
-	CachedTokens    int64
-	TotalTokens     int64
-	Failed          bool
-	InsertedAt      time.Time
+	EventKey            string // request_id from CPA payload, used as dedup key
+	Timestamp           time.Time
+	Provider            string
+	Model               string
+	Alias               string
+	APIGroupKey         string // api_key | provider | endpoint | "unknown"
+	Source              string
+	AuthIndex           string
+	AuthType            string
+	APIKey              string
+	Endpoint            string
+	RequestID           string
+	LatencyMs           int64
+	TTFTMs              int64
+	InputTokens         int64
+	OutputTokens        int64
+	ReasoningTokens     int64
+	CachedTokens        int64
+	CacheReadTokens     int64
+	CacheCreationTokens int64
+	TotalTokens         int64
+	Failed              bool
+	FailStatusCode      int
+	FailBody            string
+	ResponseHeaders     string
+	ReasoningEffort     string
+	ServiceTier         string
+	InsertedAt          time.Time
 }
 
 // ImportedEventStub is the minimal projection we need to backfill a request
@@ -122,26 +134,35 @@ type UsageEventsPage struct {
 
 // UsageEventRecord is a redacted, serializable view of a UsageEvent.
 type UsageEventRecord struct {
-	EventKey        string    `json:"event_key"`
-	Timestamp       time.Time `json:"timestamp"`
-	Provider        string    `json:"provider"`
-	Model           string    `json:"model"`
-	APIGroupKey     string    `json:"api_group_key"`
-	APIGroupDisplay string    `json:"api_group_display"`
-	Source          string    `json:"source"`
-	SourceDisplay   string    `json:"source_display"`
-	AuthIndex       string    `json:"auth_index"`
-	AuthType        string    `json:"auth_type"`
-	Endpoint        string    `json:"endpoint"`
-	RequestID       string    `json:"request_id"`
-	LatencyMs       int64     `json:"latency_ms"`
-	InputTokens     int64     `json:"input_tokens"`
-	OutputTokens    int64     `json:"output_tokens"`
-	ReasoningTokens int64     `json:"reasoning_tokens"`
-	CachedTokens    int64     `json:"cached_tokens"`
-	TotalTokens     int64     `json:"total_tokens"`
-	Failed          bool      `json:"failed"`
-	Cost            float64   `json:"cost"`
+	EventKey            string          `json:"event_key"`
+	Timestamp           time.Time       `json:"timestamp"`
+	Provider            string          `json:"provider"`
+	Model               string          `json:"model"`
+	Alias               string          `json:"alias"`
+	APIGroupKey         string          `json:"api_group_key"`
+	APIGroupDisplay     string          `json:"api_group_display"`
+	Source              string          `json:"source"`
+	SourceDisplay       string          `json:"source_display"`
+	AuthIndex           string          `json:"auth_index"`
+	AuthType            string          `json:"auth_type"`
+	Endpoint            string          `json:"endpoint"`
+	RequestID           string          `json:"request_id"`
+	LatencyMs           int64           `json:"latency_ms"`
+	TTFTMs              int64           `json:"ttft_ms"`
+	InputTokens         int64           `json:"input_tokens"`
+	OutputTokens        int64           `json:"output_tokens"`
+	ReasoningTokens     int64           `json:"reasoning_tokens"`
+	CachedTokens        int64           `json:"cached_tokens"`
+	CacheReadTokens     int64           `json:"cache_read_tokens"`
+	CacheCreationTokens int64           `json:"cache_creation_tokens"`
+	TotalTokens         int64           `json:"total_tokens"`
+	Failed              bool            `json:"failed"`
+	FailStatusCode      int             `json:"fail_status_code"`
+	FailBody            string          `json:"fail_body"`
+	ResponseHeaders     json.RawMessage `json:"response_headers,omitempty"`
+	ReasoningEffort     string          `json:"reasoning_effort"`
+	ServiceTier         string          `json:"service_tier"`
+	Cost                float64         `json:"cost"`
 }
 
 // UsageEventFilterOptions is the facet response for the events listing UI.
@@ -177,18 +198,20 @@ type UsageAnalysis struct {
 
 // UsageAggregationRow is a single aggregation row used by /usage/analysis.
 type UsageAggregationRow struct {
-	APIGroupKey     string  `json:"api_group_key,omitempty"`
-	APIGroupDisplay string  `json:"api_group_display,omitempty"`
-	Model           string  `json:"model,omitempty"`
-	Total           int64   `json:"total"`
-	Success         int64   `json:"success"`
-	Failed          int64   `json:"failed"`
-	InputTokens     int64   `json:"input_tokens"`
-	OutputTokens    int64   `json:"output_tokens"`
-	ReasoningTokens int64   `json:"reasoning_tokens"`
-	CachedTokens    int64   `json:"cached_tokens"`
-	TotalTokens     int64   `json:"total_tokens"`
-	Cost            float64 `json:"cost"`
+	APIGroupKey         string  `json:"api_group_key,omitempty"`
+	APIGroupDisplay     string  `json:"api_group_display,omitempty"`
+	Model               string  `json:"model,omitempty"`
+	Total               int64   `json:"total"`
+	Success             int64   `json:"success"`
+	Failed              int64   `json:"failed"`
+	InputTokens         int64   `json:"input_tokens"`
+	OutputTokens        int64   `json:"output_tokens"`
+	ReasoningTokens     int64   `json:"reasoning_tokens"`
+	CachedTokens        int64   `json:"cached_tokens"`
+	CacheReadTokens     int64   `json:"cache_read_tokens"`
+	CacheCreationTokens int64   `json:"cache_creation_tokens"`
+	TotalTokens         int64   `json:"total_tokens"`
+	Cost                float64 `json:"cost"`
 }
 
 // UsageOverview is the response of /usage/overview.
@@ -228,29 +251,33 @@ type UsageHealthMatrix struct {
 
 // UsageSummary is the aggregated totals shown in the overview header.
 type UsageSummary struct {
-	Total           int64   `json:"total"`
-	Success         int64   `json:"success"`
-	Failed          int64   `json:"failed"`
-	InputTokens     int64   `json:"input_tokens"`
-	OutputTokens    int64   `json:"output_tokens"`
-	ReasoningTokens int64   `json:"reasoning_tokens"`
-	CachedTokens    int64   `json:"cached_tokens"`
-	TotalTokens     int64   `json:"total_tokens"`
-	Cost            float64 `json:"cost"`
+	Total               int64   `json:"total"`
+	Success             int64   `json:"success"`
+	Failed              int64   `json:"failed"`
+	InputTokens         int64   `json:"input_tokens"`
+	OutputTokens        int64   `json:"output_tokens"`
+	ReasoningTokens     int64   `json:"reasoning_tokens"`
+	CachedTokens        int64   `json:"cached_tokens"`
+	CacheReadTokens     int64   `json:"cache_read_tokens"`
+	CacheCreationTokens int64   `json:"cache_creation_tokens"`
+	TotalTokens         int64   `json:"total_tokens"`
+	Cost                float64 `json:"cost"`
 }
 
 // UsageBucket is one bucket on the time series chart.
 type UsageBucket struct {
-	Bucket          time.Time `json:"bucket"`
-	Total           int64     `json:"total"`
-	Success         int64     `json:"success"`
-	Failed          int64     `json:"failed"`
-	InputTokens     int64     `json:"input_tokens"`
-	OutputTokens    int64     `json:"output_tokens"`
-	ReasoningTokens int64     `json:"reasoning_tokens"`
-	CachedTokens    int64     `json:"cached_tokens"`
-	TotalTokens     int64     `json:"total_tokens"`
-	Cost            float64   `json:"cost"`
+	Bucket              time.Time `json:"bucket"`
+	Total               int64     `json:"total"`
+	Success             int64     `json:"success"`
+	Failed              int64     `json:"failed"`
+	InputTokens         int64     `json:"input_tokens"`
+	OutputTokens        int64     `json:"output_tokens"`
+	ReasoningTokens     int64     `json:"reasoning_tokens"`
+	CachedTokens        int64     `json:"cached_tokens"`
+	CacheReadTokens     int64     `json:"cache_read_tokens"`
+	CacheCreationTokens int64     `json:"cache_creation_tokens"`
+	TotalTokens         int64     `json:"total_tokens"`
+	Cost                float64   `json:"cost"`
 }
 
 // HealthCell is one cell of the range-sized health heatmap (15-minute spans by default).

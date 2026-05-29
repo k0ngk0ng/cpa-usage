@@ -50,7 +50,7 @@ export default function SeriesChart({ data, granularity, mode = "requests", heig
       ? {
           bucket: d.bucket,
           label: labelFor(d.bucket),
-          input: d.input_tokens + d.cached_tokens,
+          input: d.input_tokens + d.cached_tokens + d.cache_creation_tokens,
           output: d.output_tokens + d.reasoning_tokens,
         }
       : {
