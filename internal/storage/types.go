@@ -103,7 +103,7 @@ type APIKeyOverview struct {
 
 // UsageFilter parameterizes all aggregation/listing queries.
 type UsageFilter struct {
-	Range     string // all | today | 4h | 8h | 12h | 24h | 2d | 3d | 7d | 30d | custom
+	Range     string // all | today | 4h | 8h | 12h | 24h | 2d | 3d | 4d | 5d | 6d | 7d | 30d | custom
 	Start     time.Time
 	End       time.Time
 	Models    []string

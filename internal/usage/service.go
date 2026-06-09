@@ -102,6 +102,18 @@ func ParseFilter(rangeKey string, startStr, endStr string, models, sources, apiK
 		end := startOfDay(now).Add(24 * time.Hour)
 		f.End = end
 		f.Start = end.Add(-3 * 24 * time.Hour)
+	case "4d":
+		end := startOfDay(now).Add(24 * time.Hour)
+		f.End = end
+		f.Start = end.Add(-4 * 24 * time.Hour)
+	case "5d":
+		end := startOfDay(now).Add(24 * time.Hour)
+		f.End = end
+		f.Start = end.Add(-5 * 24 * time.Hour)
+	case "6d":
+		end := startOfDay(now).Add(24 * time.Hour)
+		f.End = end
+		f.Start = end.Add(-6 * 24 * time.Hour)
 	case "7d":
 		end := startOfDay(now).Add(24 * time.Hour)
 		f.End = end

@@ -48,6 +48,24 @@ func TestParseFilterDayRanges(t *testing.T) {
 			wantStart: time.Date(2026, time.May, 24, 0, 0, 0, 0, loc),
 			wantEnd:   time.Date(2026, time.May, 27, 0, 0, 0, 0, loc),
 		},
+		{
+			name:      "4d",
+			rangeKey:  "4d",
+			wantStart: time.Date(2026, time.May, 23, 0, 0, 0, 0, loc),
+			wantEnd:   time.Date(2026, time.May, 27, 0, 0, 0, 0, loc),
+		},
+		{
+			name:      "5d",
+			rangeKey:  "5d",
+			wantStart: time.Date(2026, time.May, 22, 0, 0, 0, 0, loc),
+			wantEnd:   time.Date(2026, time.May, 27, 0, 0, 0, 0, loc),
+		},
+		{
+			name:      "6d",
+			rangeKey:  "6d",
+			wantStart: time.Date(2026, time.May, 21, 0, 0, 0, 0, loc),
+			wantEnd:   time.Date(2026, time.May, 27, 0, 0, 0, 0, loc),
+		},
 	}
 
 	for _, tc := range tests {
