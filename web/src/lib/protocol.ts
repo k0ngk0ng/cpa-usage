@@ -269,9 +269,14 @@ function codeFence(text: string, language = ""): string {
 }
 
 function imagePartToMarkdown(part: Record<string, unknown>, alt: string): string | null {
-  const url = imageURLFromPart(part)?.trim();
-  if (!url || !isDisplayableImageURL(url)) return null;
+  const url = displayableImageURLFromPart(part);
+  if (!url) return null;
   return `![${escapeMarkdownAlt(alt)}](${url})`;
+}
+
+export function displayableImageURLFromPart(part: Record<string, unknown>): string | null {
+  const url = imageURLFromPart(part)?.trim();
+  return url && isDisplayableImageURL(url) ? url : null;
 }
 
 function imageURLFromPart(part: Record<string, unknown>): string | null {

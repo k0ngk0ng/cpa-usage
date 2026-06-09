@@ -146,6 +146,14 @@ body {
 .thinking-part { box-shadow: inset 3px 0 0 #e6c98f; }
 .generic-part,
 .chat-hidden-part { box-shadow: inset 3px 0 0 #8a93a3; }
+.image-part {
+  border: 1px solid #3b4454; border-radius: 6px; background: #111722;
+  padding: 0.65rem; box-shadow: inset 3px 0 0 #9ec5ff;
+}
+.chat-image {
+  display: block; max-width: 100%; max-height: 520px; object-fit: contain;
+  border: 1px solid #262b36; border-radius: 4px; background: #0b0d11;
+}
 .tool-use-header,
 .part-header {
   display: flex; align-items: center; justify-content: space-between;

@@ -6,6 +6,7 @@ import { api, HttpError } from "../api/client";
 import type { APIResponseAttempt, EventLogEntry, UsageEventRecord } from "../api/types";
 import { formatBytes, formatCost, formatLatency, formatNumber, formatTimestamp } from "../lib/utils";
 import {
+  displayableImageURLFromPart,
   extractRequestTurns,
   extractRequestToolDeclarations,
   extractResponseJSON,
@@ -875,6 +876,7 @@ function ToggleButton({
 function ChatView({ turns }: { turns: Turn[] }) {
   const [expandedTools, setExpandedTools] = useState<Set<number>>(() => new Set());
   const [expandedRaw, setExpandedRaw] = useState<Set<number>>(() => new Set());
+  const [copiedTurn, setCopiedTurn] = useState<number | null>(null);
   const toggleTool = (index: number) => {
     setExpandedTools((current) => {
       const next = new Set(current);
@@ -891,6 +893,17 @@ function ChatView({ turns }: { turns: Turn[] }) {
       return next;
     });
   };
+  const copyTurn = (index: number, text: string) => {
+    void copyToClipboard(text).then((ok) => {
+      if (ok) setCopiedTurn(index);
+    });
+  };
+
+  useEffect(() => {
+    if (copiedTurn == null) return;
+    const timeout = window.setTimeout(() => setCopiedTurn(null), 1200);
+    return () => window.clearTimeout(timeout);
+  }, [copiedTurn]);
 
   return (
     <div className="bg-panel border border-border rounded p-3 chat-view">
@@ -899,7 +912,7 @@ function ChatView({ turns }: { turns: Turn[] }) {
         const collapsed = isTool && !expandedTools.has(index);
         const rawText = turnRawText(turn);
         const rawExpanded = rawText != null && expandedRaw.has(index);
-        const hasActions = isTool || rawText != null;
+        const copyText = rawText ?? turnText(turn);
         const bubbleClass = isTool ? "chat-bubble-tool" : chatBubbleClass(turn.role);
         const parts = rawExpanded || collapsed ? null : visualContentParts(turn);
         return (
@@ -916,25 +929,30 @@ function ChatView({ turns }: { turns: Turn[] }) {
                   {turn.role}
                 </span>
                 <span className="chat-turn">#{index + 1}</span>
-                {hasActions && (
-                  <div className="chat-actions">
-                    {isTool && (
-                      <button className="chat-toggle" onClick={() => toggleTool(index)}>
-                        {collapsed ? "Expand" : "Collapse"}
-                      </button>
-                    )}
-                    {rawText != null && (
-                      <button
-                        className={clsx("chat-toggle", rawExpanded && "chat-toggle-active")}
-                        onClick={() => toggleRaw(index)}
-                        aria-pressed={rawExpanded}
-                        title="Show JSON"
-                      >
-                        {rawExpanded ? "Hide" : "JSON"}
-                      </button>
-                    )}
-                  </div>
-                )}
+                <div className="chat-actions">
+                  {isTool && (
+                    <button className="chat-toggle" onClick={() => toggleTool(index)}>
+                      {collapsed ? "Expand" : "Collapse"}
+                    </button>
+                  )}
+                  {rawText != null && (
+                    <button
+                      className={clsx("chat-toggle", rawExpanded && "chat-toggle-active")}
+                      onClick={() => toggleRaw(index)}
+                      aria-pressed={rawExpanded}
+                      title="Show JSON"
+                    >
+                      {rawExpanded ? "Hide" : "JSON"}
+                    </button>
+                  )}
+                  <button
+                    className={clsx("chat-toggle", copiedTurn === index && "chat-toggle-active")}
+                    onClick={() => copyTurn(index, copyText)}
+                    title={rawText != null ? "Copy JSON" : "Copy message text"}
+                  >
+                    {copiedTurn === index ? "Copied" : "Copy"}
+                  </button>
+                </div>
               </div>
               {rawExpanded ? (
                 <pre className="chat-raw-json">{rawText}</pre>
@@ -1017,7 +1035,30 @@ function StructuredContentPart({ part, index }: { part: Record<string, unknown>;
   if (type === "tool_result") {
     return <ToolResultPart part={part} />;
   }
+  if (isImageVisualPart(type)) {
+    return <ImagePart part={part} index={index} />;
+  }
   return <GenericPart part={part} type={type || `part ${index + 1}`} />;
+}
+
+function ImagePart({ part, index }: { part: Record<string, unknown>; index: number }) {
+  const type = stringRecordValue(part.type) || "image";
+  const url = displayableImageURLFromPart(part);
+  const detail = stringRecordValue(part.detail);
+  const fileID = stringRecordValue(part.file_id) || stringRecordValue(part.fileId);
+  return (
+    <div className="image-part">
+      <div className="part-header">
+        <span className="part-type-badge">{type}</span>
+        {(detail || fileID) && <span className="part-muted">{detail || fileID}</span>}
+      </div>
+      {url ? (
+        <img className="chat-image" src={url} alt={`image ${index + 1}`} loading="lazy" />
+      ) : (
+        <JsonValueBlock label="Image" value={part} />
+      )}
+    </div>
+  );
 }
 
 function ThinkingPart({ part, type }: { part: Record<string, unknown>; type: string }) {
@@ -1158,6 +1199,10 @@ function isPlainTextPart(part: Record<string, unknown>): boolean {
   return (type === "text" || type === "input_text" || type === "output_text") && typeof part.text === "string";
 }
 
+function isImageVisualPart(type: string): boolean {
+  return type === "image" || type === "input_image" || type === "image_url";
+}
+
 function askUserQuestions(input: unknown): VisualQuestion[] | null {
   const obj = isRecord(input) ? input : null;
   const rawQuestions = obj?.questions;
@@ -1205,6 +1250,33 @@ function rawValueText(value: unknown): string {
     return JSON.stringify(value, null, 2) ?? String(value);
   } catch {
     return String(value);
+  }
+}
+
+async function copyToClipboard(text: string): Promise<boolean> {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      /* fall back to execCommand */
+    }
+  }
+  if (typeof document === "undefined") return false;
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.top = "0";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, text.length);
+  try {
+    return document.execCommand("copy");
+  } finally {
+    document.body.removeChild(textarea);
   }
 }
 
