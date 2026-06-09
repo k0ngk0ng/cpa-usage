@@ -68,6 +68,7 @@ All configuration is via environment variables (also see `.env.example`):
 | `STORAGE_DRIVER` | `sqlite` | Only `sqlite` in v1 |
 | `SQLITE_PATH` | `./data/app.db` | Resolved against the process working directory |
 | `REDIS_QUEUE_ADDR` | — | Defaults to `<cpa-host>:8317` |
+| `REDIS_QUEUE_KEY` | `usage` | RESP channel name; CPA v7+ rejects the old `queue` key |
 | `REDIS_QUEUE_BATCH_SIZE` | `1000` | |
 | `REDIS_QUEUE_IDLE_INTERVAL` | `1s` | |
 | `REDIS_QUEUE_ERROR_BACKOFF` | `10s` | |

@@ -22,7 +22,7 @@ const (
 	RedisDefaultPort   = "8317"
 	RedisAuthCommand   = "AUTH"
 	RedisLPopCommand   = "LPOP"
-	RedisUsageQueueKey = "queue"
+	RedisUsageQueueKey = "usage"
 )
 
 // AuthFile mirrors a single entry from /v0/management/auth-files.

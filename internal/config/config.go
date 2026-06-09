@@ -24,11 +24,12 @@ type Config struct {
 	StorageDriver string
 	SQLitePath    string
 
-	RedisQueueAddr     string
-	RedisQueueBatch    int
-	RedisIdleInterval  time.Duration
-	RedisErrorBackoff  time.Duration
-	MetadataInterval   time.Duration
+	RedisQueueAddr    string
+	RedisQueueKey     string
+	RedisQueueBatch   int
+	RedisIdleInterval time.Duration
+	RedisErrorBackoff time.Duration
+	MetadataInterval  time.Duration
 
 	TZ           string
 	LogLevel     string
@@ -40,10 +41,10 @@ type Config struct {
 	LogBodyMaxBytes   int64
 	LogHeaderMaxBytes int64
 
-	AuthEnabled    bool
-	LoginPassword  string
-	SessionTTL     time.Duration
-	CookieName     string
+	AuthEnabled   bool
+	LoginPassword string
+	SessionTTL    time.Duration
+	CookieName    string
 }
 
 // Load reads the configuration from environment variables.
@@ -57,6 +58,7 @@ func Load() (*Config, error) {
 		StorageDriver:     strOr("STORAGE_DRIVER", "sqlite"),
 		SQLitePath:        strOr("SQLITE_PATH", "./data/app.db"),
 		RedisQueueAddr:    strings.TrimSpace(os.Getenv("REDIS_QUEUE_ADDR")),
+		RedisQueueKey:     strOr("REDIS_QUEUE_KEY", "usage"),
 		RedisQueueBatch:   intOr("REDIS_QUEUE_BATCH_SIZE", 1000),
 		RedisIdleInterval: durationOr("REDIS_QUEUE_IDLE_INTERVAL", time.Second),
 		RedisErrorBackoff: durationOr("REDIS_QUEUE_ERROR_BACKOFF", 10*time.Second),

@@ -79,6 +79,7 @@ func New(cfg *config.Config, build BuildInfo) (*App, error) {
 		BaseURL:       cfg.CPABaseURL,
 		OverrideAddr:  cfg.RedisQueueAddr,
 		ManagementKey: cfg.CPAManagementKey,
+		QueueKey:      cfg.RedisQueueKey,
 		Timeout:       cfg.RequestTimeout,
 		BatchSize:     cfg.RedisQueueBatch,
 	})
@@ -152,6 +153,7 @@ func (a *App) Run(ctx context.Context) error {
 		"port":       a.cfg.AppPort,
 		"sqlite":     a.cfg.SQLitePath,
 		"redis_addr": a.cfg.RedisQueueAddr,
+		"redis_key":  a.cfg.RedisQueueKey,
 		"tz":         a.cfg.TZ,
 	}).Info("cpa-usage starting")
 
