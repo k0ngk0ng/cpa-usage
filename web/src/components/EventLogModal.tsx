@@ -6,6 +6,7 @@ import { api, HttpError } from "../api/client";
 import type { APIResponseAttempt, EventLogEntry, UsageEventRecord } from "../api/types";
 import { formatBytes, formatCost, formatLatency, formatNumber, formatTimestamp } from "../lib/utils";
 import {
+  displayableGeneratedImageURLFromPart,
   displayableImageURLFromPart,
   extractRequestTurns,
   extractRequestToolDeclarations,
@@ -1015,11 +1016,10 @@ function StructuredContentParts({
 function StructuredContentPart({ part, index }: { part: Record<string, unknown>; index: number }) {
   const type = stringRecordValue(part.type);
   if (type === "text" || type === "input_text" || type === "output_text") {
-    const text = stringRecordValue(part.text);
-    return text ? <MarkdownContent text={text} className="chat-part-text prose-md" /> : null;
+    return <TextPart part={part} />;
   }
   if (type === "thinking" || type === "reasoning") {
-    return <ThinkingPart part={part} type={type} />;
+    return type === "reasoning" ? <ReasoningPart part={part} /> : <ThinkingPart part={part} type={type} />;
   }
   if (type === "redacted_thinking") {
     return (
@@ -1029,19 +1029,46 @@ function StructuredContentPart({ part, index }: { part: Record<string, unknown>;
       </div>
     );
   }
-  if (type === "tool_use") {
-    return <ToolUsePart part={part} index={index} />;
+  if (type === "tool_use" || type === "mcp_tool_use" || type === "server_tool_use") {
+    return <ToolUsePart part={part} index={index} type={type} />;
   }
   if (type === "function_call" || type === "custom_tool_call") {
     return <FunctionCallPart part={part} type={type} />;
   }
-  if (type === "tool_result") {
-    return <ToolResultPart part={part} />;
+  if (type === "function_call_output" || type === "custom_tool_call_output") {
+    return <FunctionCallOutputPart part={part} type={type} />;
+  }
+  if (type === "tool_result" || type === "mcp_tool_result" || type === "web_search_tool_result") {
+    return <ToolResultPart part={part} type={type} />;
+  }
+  if (type === "input_file" || type === "input_audio" || type === "file" || type === "document") {
+    return <FilePart part={part} type={type || "file"} />;
   }
   if (isImageVisualPart(type)) {
     return <ImagePart part={part} index={index} />;
   }
+  if (type === "image_generation_call") {
+    return <ImageGenerationPart part={part} />;
+  }
+  if (type === "web_search_call") {
+    return <WebSearchCallPart part={part} />;
+  }
   return <GenericPart part={part} type={type || `part ${index + 1}`} />;
+}
+
+function TextPart({ part }: { part: Record<string, unknown> }) {
+  const text = stringRecordValue(part.text);
+  const annotations = Array.isArray(part.annotations) ? part.annotations : [];
+  return (
+    <div>
+      {text ? <MarkdownContent text={text} className="chat-part-text prose-md" /> : null}
+      {annotations.length > 0 && (
+        <div className="part-meta">
+          <span className="part-chip">{annotations.length} annotation{annotations.length === 1 ? "" : "s"}</span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ImagePart({ part, index }: { part: Record<string, unknown>; index: number }) {
@@ -1077,17 +1104,42 @@ function ThinkingPart({ part, type }: { part: Record<string, unknown>; type: str
   );
 }
 
-function ToolUsePart({ part, index }: { part: Record<string, unknown>; index: number }) {
+function ReasoningPart({ part }: { part: Record<string, unknown> }) {
+  const text = reasoningText(part);
+  const encrypted = !!stringRecordValue(part.encrypted_content) || part.encrypted === true;
+  return (
+    <div className="thinking-part">
+      <div className="part-header">
+        <div className="tool-use-title">
+          <span className="part-type-badge">reasoning</span>
+          {stringRecordValue(part.status) && <span className="part-chip">{stringRecordValue(part.status)}</span>}
+        </div>
+        {stringRecordValue(part.id) && <span className="tool-id">{stringRecordValue(part.id)}</span>}
+      </div>
+      {text ? <div className="thinking-text">{text}</div> : null}
+      {!text && encrypted ? (
+        <div className="chat-hidden-part">
+          <span>Encrypted reasoning block</span>
+        </div>
+      ) : null}
+      {!text && !encrypted ? <JsonValueBlock label="Payload" value={part} /> : null}
+    </div>
+  );
+}
+
+function ToolUsePart({ part, index, type }: { part: Record<string, unknown>; index: number; type: string }) {
   const name = stringRecordValue(part.name) || `tool_${index + 1}`;
   const id = stringRecordValue(part.id) || stringRecordValue(part.tool_use_id) || stringRecordValue(part.call_id);
+  const serverName = stringRecordValue(part.server_name);
   const input = part.input ?? {};
   const questions = askUserQuestions(input);
   return (
     <div className="tool-use-card">
       <div className="tool-use-header">
         <div className="tool-use-title">
-          <span className="part-type-badge">tool_use</span>
+          <span className="part-type-badge">{type}</span>
           <span className="tool-name">{name}</span>
+          {serverName && <span className="part-chip">{serverName}</span>}
         </div>
         {id && <span className="tool-id">{id}</span>}
       </div>
@@ -1118,15 +1170,33 @@ function FunctionCallPart({ part, type }: { part: Record<string, unknown>; type:
   );
 }
 
-function ToolResultPart({ part }: { part: Record<string, unknown> }) {
-  const id = stringRecordValue(part.tool_use_id) || stringRecordValue(part.id) || stringRecordValue(part.call_id);
+function FunctionCallOutputPart({ part, type }: { part: Record<string, unknown>; type: string }) {
+  const id = stringRecordValue(part.call_id) || stringRecordValue(part.id);
   return (
     <div className="tool-result-card">
       <div className="tool-use-header">
         <div className="tool-use-title">
-          <span className="part-type-badge">tool_result</span>
-          {id && <span className="tool-id">{id}</span>}
+          <span className="part-type-badge">{type}</span>
         </div>
+        {id && <span className="tool-id">{id}</span>}
+      </div>
+      <JsonValueBlock label="Output" value={part.output ?? part.content ?? null} />
+    </div>
+  );
+}
+
+function ToolResultPart({ part, type }: { part: Record<string, unknown>; type: string }) {
+  const id = stringRecordValue(part.tool_use_id) || stringRecordValue(part.id) || stringRecordValue(part.call_id);
+  const serverName = stringRecordValue(part.server_name);
+  return (
+    <div className="tool-result-card">
+      <div className="tool-use-header">
+        <div className="tool-use-title">
+          <span className="part-type-badge">{type}</span>
+          {part.is_error === true && <span className="part-chip part-chip-danger">error</span>}
+          {serverName && <span className="part-chip">{serverName}</span>}
+        </div>
+        {id && <span className="tool-id">{id}</span>}
       </div>
       <ToolResultContent value={part.content} />
     </div>
@@ -1144,6 +1214,91 @@ function ToolResultContent({ value }: { value: unknown }) {
     }
   }
   return <JsonValueBlock label="Content" value={value ?? null} />;
+}
+
+function FilePart({ part, type }: { part: Record<string, unknown>; type: string }) {
+  const title =
+    stringRecordValue(part.filename) ||
+    stringRecordValue(part.name) ||
+    stringRecordValue(part.title) ||
+    stringRecordValue(part.file_id) ||
+    stringRecordValue(part.fileId) ||
+    stringRecordValue(part.file_url) ||
+    "file";
+  const source = isRecord(part.source) ? part.source : null;
+  const sourceType = stringRecordValue(source?.type);
+  return (
+    <div className="generic-part">
+      <div className="part-header">
+        <div className="tool-use-title">
+          <span className="part-type-badge">{type}</span>
+          <span className="tool-name">{title}</span>
+        </div>
+        {stringRecordValue(part.media_type ?? part.mime_type) && (
+          <span className="part-muted">{stringRecordValue(part.media_type ?? part.mime_type)}</span>
+        )}
+      </div>
+      <div className="part-meta">
+        {stringRecordValue(part.file_id ?? part.fileId) && <span className="part-chip">{stringRecordValue(part.file_id ?? part.fileId)}</span>}
+        {sourceType && <span className="part-chip">source: {sourceType}</span>}
+        {Array.isArray(part.citations) && <span className="part-chip">{part.citations.length} citations</span>}
+        {inlineDataLength(part) > 0 && <span className="part-chip">{formatNumber(inlineDataLength(part))} inline chars</span>}
+      </div>
+      <JsonValueBlock label="Details" value={filePartSummary(part)} />
+    </div>
+  );
+}
+
+function ImageGenerationPart({ part }: { part: Record<string, unknown> }) {
+  const url = displayableGeneratedImageURLFromPart(part);
+  return (
+    <div className="image-part">
+      <div className="part-header">
+        <div className="tool-use-title">
+          <span className="part-type-badge">image_generation_call</span>
+          {stringRecordValue(part.status) && <span className="part-chip">{stringRecordValue(part.status)}</span>}
+        </div>
+        {stringRecordValue(part.id) && <span className="tool-id">{stringRecordValue(part.id)}</span>}
+      </div>
+      <div className="part-meta">
+        {["action", "size", "quality", "background", "output_format"].map((key) =>
+          stringRecordValue(part[key]) ? <span key={key} className="part-chip">{key}: {stringRecordValue(part[key])}</span> : null,
+        )}
+      </div>
+      {url ? <img className="chat-image" src={url} alt="generated image" loading="lazy" /> : null}
+      {stringRecordValue(part.revised_prompt) && (
+        <div className="tool-json-wrap">
+          <div className="tool-json-label">Revised prompt</div>
+          <div className="tool-json-block">{stringRecordValue(part.revised_prompt)}</div>
+        </div>
+      )}
+      {!url && <JsonValueBlock label="Payload" value={part} />}
+    </div>
+  );
+}
+
+function WebSearchCallPart({ part }: { part: Record<string, unknown> }) {
+  const action = isRecord(part.action) ? part.action : null;
+  const actionType = stringRecordValue(action?.type) || stringRecordValue(part.status) || "web_search";
+  const sources = Array.isArray(action?.sources) ? action.sources.length : 0;
+  return (
+    <div className="generic-part">
+      <div className="part-header">
+        <div className="tool-use-title">
+          <span className="part-type-badge">web_search_call</span>
+          <span className="tool-name">{actionType}</span>
+        </div>
+        {stringRecordValue(part.id) && <span className="tool-id">{stringRecordValue(part.id)}</span>}
+      </div>
+      <div className="part-meta">
+        {stringRecordValue(part.status) && <span className="part-chip">{stringRecordValue(part.status)}</span>}
+        {stringRecordValue(action?.query) && <span className="part-chip">query</span>}
+        {stringRecordValue(action?.url) && <span className="part-chip">url</span>}
+        {sources > 0 && <span className="part-chip">{sources} sources</span>}
+      </div>
+      {action ? <JsonValueBlock label="Action" value={action} /> : <JsonValueBlock label="Payload" value={part} />}
+    </div>
+  );
 }
 
 interface VisualQuestion {
@@ -1272,6 +1427,76 @@ function askUserQuestions(input: unknown): VisualQuestion[] | null {
     };
   });
   return questions.length > 0 ? questions : null;
+}
+
+function reasoningText(part: Record<string, unknown>): string {
+  const direct = stringRecordValue(part.text) || stringRecordValue(part.thinking);
+  if (direct) return direct;
+  const summary = Array.isArray(part.summary)
+    ? part.summary
+        .map((item) => (isRecord(item) ? stringRecordValue(item.text) : ""))
+        .filter(Boolean)
+        .join("\n")
+    : "";
+  if (summary) return summary;
+  if (Array.isArray(part.content)) {
+    return part.content
+      .map((item) => {
+        if (!isRecord(item)) return "";
+        return stringRecordValue(item.text) || stringRecordValue(item.thinking);
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+  return "";
+}
+
+function filePartSummary(part: Record<string, unknown>): Record<string, unknown> {
+  const source = isRecord(part.source) ? part.source : null;
+  const summary: Record<string, unknown> = {};
+  for (const key of [
+    "type",
+    "filename",
+    "name",
+    "title",
+    "media_type",
+    "mime_type",
+    "file_id",
+    "fileId",
+    "file_url",
+    "format",
+  ]) {
+    if (part[key] != null) summary[key] = part[key];
+  }
+  if (source) {
+    summary.source = summarizeInlinePayload(source);
+  }
+  const dataKeys = ["file_data", "data"];
+  for (const key of dataKeys) {
+    const data = stringRecordValue(part[key]);
+    if (data) summary[key] = `${data.length.toLocaleString()} chars`;
+  }
+  if (Array.isArray(part.citations)) summary.citations = `${part.citations.length} item${part.citations.length === 1 ? "" : "s"}`;
+  return summary;
+}
+
+function summarizeInlinePayload(value: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if ((key === "data" || key === "file_data") && typeof raw === "string") {
+      out[key] = `${raw.length.toLocaleString()} chars`;
+    } else {
+      out[key] = raw;
+    }
+  }
+  return out;
+}
+
+function inlineDataLength(part: Record<string, unknown>): number {
+  const own = stringRecordValue(part.file_data).length || stringRecordValue(part.data).length;
+  if (own) return own;
+  const source = isRecord(part.source) ? part.source : null;
+  return source ? stringRecordValue(source.data).length || stringRecordValue(source.file_data).length : 0;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

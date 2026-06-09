@@ -279,6 +279,16 @@ export function displayableImageURLFromPart(part: Record<string, unknown>): stri
   return url && isDisplayableImageURL(url) ? url : null;
 }
 
+export function displayableGeneratedImageURLFromPart(part: Record<string, unknown>): string | null {
+  const data = stringValue(part.result ?? part.partial ?? part.partial_image_b64);
+  if (!data) return null;
+  const mimeType =
+    stringValue(part.mime_type ?? part.media_type) ||
+    imageMimeTypeFromOutputFormat(stringValue(part.output_format)) ||
+    "image/png";
+  return dataToImageURL(mimeType, data);
+}
+
 function imageURLFromPart(part: Record<string, unknown>): string | null {
   const sourceURL = imageURLFromSource(part.source);
   if (sourceURL) return sourceURL;

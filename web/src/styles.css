@@ -162,6 +162,19 @@ body {
 .tool-use-title {
   display: flex; align-items: center; min-width: 0; gap: 0.45rem;
 }
+.part-meta {
+  display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.25rem 0 0.45rem;
+}
+.part-chip {
+  display: inline-flex; align-items: center; min-width: 0; max-width: 100%;
+  border: 1px solid #3b4454; border-radius: 4px; background: #171c26;
+  color: #c9d0dc; padding: 0.08rem 0.35rem;
+  font-family: "JetBrains Mono", Menlo, Consolas, monospace; font-size: 10px;
+  line-height: 1.35; overflow-wrap: anywhere;
+}
+.part-chip-danger {
+  color: #ff8f8f; border-color: #7a3030; background: #351719;
+}
 .part-type-badge {
   display: inline-flex; align-items: center; height: 19px; padding: 0 0.45rem;
   border: 1px solid #3b5f8f; border-radius: 4px; color: #9ec5ff;
