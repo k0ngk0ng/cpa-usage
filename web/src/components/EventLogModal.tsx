@@ -1032,6 +1032,9 @@ function StructuredContentPart({ part, index }: { part: Record<string, unknown>;
   if (type === "tool_use") {
     return <ToolUsePart part={part} index={index} />;
   }
+  if (type === "function_call" || type === "custom_tool_call") {
+    return <FunctionCallPart part={part} type={type} />;
+  }
   if (type === "tool_result") {
     return <ToolResultPart part={part} />;
   }
@@ -1093,6 +1096,24 @@ function ToolUsePart({ part, index }: { part: Record<string, unknown>; index: nu
       ) : (
         <JsonValueBlock label="Input" value={input} />
       )}
+    </div>
+  );
+}
+
+function FunctionCallPart({ part, type }: { part: Record<string, unknown>; type: string }) {
+  const name = stringRecordValue(part.name) || "function";
+  const id = stringRecordValue(part.call_id) || stringRecordValue(part.id);
+  const input = type === "custom_tool_call" ? part.input : part.arguments;
+  return (
+    <div className="tool-use-card">
+      <div className="tool-use-header">
+        <div className="tool-use-title">
+          <span className="part-type-badge">{type}</span>
+          <span className="tool-name">{name}</span>
+        </div>
+        {id && <span className="tool-id">{id}</span>}
+      </div>
+      <JsonValueBlock label={type === "custom_tool_call" ? "Input" : "Arguments"} value={input ?? {}} />
     </div>
   );
 }
@@ -1187,11 +1208,39 @@ function JsonValueBlock({ label, value }: { label: string; value: unknown }) {
 
 function visualContentParts(turn: Turn): Record<string, unknown>[] | null {
   const raw = isRecord(turn.raw) ? turn.raw : null;
+  const rawType = stringRecordValue(raw?.type);
+  if (raw && isStandaloneVisualPart(rawType)) return [raw];
+
   const content = raw?.content;
-  if (!Array.isArray(content)) return null;
-  const parts = content.filter(isRecord);
+  const output = raw?.output;
+  const parts = Array.isArray(content)
+    ? content.filter(isRecord)
+    : Array.isArray(output)
+      ? output.flatMap(responsesOutputVisualParts)
+      : [];
   if (parts.length === 0) return null;
   return parts.some((part) => !isPlainTextPart(part)) ? parts : null;
+}
+
+function responsesOutputVisualParts(item: unknown): Record<string, unknown>[] {
+  if (!isRecord(item)) return [];
+  const type = stringRecordValue(item.type);
+  if (type === "message" && Array.isArray(item.content)) {
+    return item.content.filter(isRecord);
+  }
+  return isStandaloneVisualPart(type) ? [item] : [];
+}
+
+function isStandaloneVisualPart(type: string): boolean {
+  return (
+    type === "function_call" ||
+    type === "custom_tool_call" ||
+    type === "function_call_output" ||
+    type === "custom_tool_call_output" ||
+    type === "image_generation_call" ||
+    type === "web_search_call" ||
+    type === "reasoning"
+  );
 }
 
 function isPlainTextPart(part: Record<string, unknown>): boolean {
@@ -1293,7 +1342,12 @@ function startsWithCollapsibleBlock(text: string): boolean {
 }
 
 function startsWithToolBlock(text: string): boolean {
-  return text.startsWith("**[tool_use ") || text.startsWith("**[tool_result");
+  return (
+    text.startsWith("**[tool_use ") ||
+    text.startsWith("**[tool_result") ||
+    text.startsWith("**[function_call ") ||
+    text.startsWith("**[custom_tool_call ")
+  );
 }
 
 function startsWithWebSearchCallBlock(text: string): boolean {
@@ -1301,7 +1355,7 @@ function startsWithWebSearchCallBlock(text: string): boolean {
 }
 
 function chatPreview(turn: Turn): string {
-  const text = turnText(turn).replace(/[`*_#>\[\]()]/g, "").replace(/\s+/g, " ").trim();
+  const text = turnText(turn).replace(/[`*#>\[\]()]/g, "").replace(/\s+/g, " ").trim();
   if (!text) return "(empty)";
   return text.length > 160 ? text.slice(0, 160) + "..." : text;
 }

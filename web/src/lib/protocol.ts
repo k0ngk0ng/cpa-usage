@@ -430,7 +430,7 @@ function responsesInputToTurn(raw: unknown): Turn {
     const json = formatPartialJSON(args);
     return {
       role: "assistant",
-      text: toolUseMarkdown(name, m.call_id, json, "json"),
+      text: functionCallMarkdown("function_call", name, m.call_id, json, "json"),
       raw: m,
     };
   }
@@ -439,7 +439,7 @@ function responsesInputToTurn(raw: unknown): Turn {
     const input = typeof m.input === "string" ? m.input : JSON.stringify(m.input ?? "", null, 2);
     return {
       role: "assistant",
-      text: toolUseMarkdown(name, m.call_id, input, customToolLanguage(name, input)),
+      text: functionCallMarkdown("custom_tool_call", name, m.call_id, input, customToolLanguage(name, input)),
       raw: m,
     };
   }
@@ -558,6 +558,16 @@ function isKnownResponsesOutputType(type: string): boolean {
 
 function toolUseMarkdown(name: string, rawCallID: unknown, input: string, language = ""): string {
   return `**[tool_use ${name}${callIDSuffix(rawCallID)}]**\n\n${codeFence(input, language)}`;
+}
+
+function functionCallMarkdown(
+  type: "function_call" | "custom_tool_call",
+  name: string,
+  rawCallID: unknown,
+  input: string,
+  language = "",
+): string {
+  return `**[${type} ${name}${callIDSuffix(rawCallID)}]**\n\n${codeFence(input, language)}`;
 }
 
 function toolResultMarkdown(rawCallID: unknown, output: string): string {
@@ -978,7 +988,7 @@ export function extractResponseStream(text: string): StreamExtraction {
     const language = c.custom ? customToolLanguage(c.name, input) : "json";
     responseItems.push({
       order: c.order,
-      markdown: toolUseMarkdown(c.name, c.callID, input, language),
+      markdown: functionCallMarkdown(c.custom ? "custom_tool_call" : "function_call", c.name, c.callID, input, language),
     });
   }
   responseItems.sort((a, b) => a.order - b.order);
@@ -1168,7 +1178,7 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
         const args = typeof it.arguments === "string" ? (it.arguments as string) : JSON.stringify(it.arguments ?? {});
         const json = formatPartialJSON(args);
         const sep = out.content ? "\n\n" : "";
-        out.content += sep + toolUseMarkdown(name, it.call_id, json, "json");
+        out.content += sep + functionCallMarkdown("function_call", name, it.call_id, json, "json");
         out.detected = true;
         continue;
       }
@@ -1176,7 +1186,7 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
         const name = String(it.name || "tool");
         const input = typeof it.input === "string" ? it.input : JSON.stringify(it.input ?? "", null, 2);
         const sep = out.content ? "\n\n" : "";
-        out.content += sep + toolUseMarkdown(name, it.call_id, input, customToolLanguage(name, input));
+        out.content += sep + functionCallMarkdown("custom_tool_call", name, it.call_id, input, customToolLanguage(name, input));
         out.detected = true;
         continue;
       }
