@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import { api } from "../api/client";
 import type { Filter, RangeKey, ResultFilter, APIKeyFilterOption } from "../api/types";
@@ -73,7 +73,7 @@ export default function FilterBar({
   };
 
   return (
-    <div className="bg-panel border border-border rounded-lg p-4 mb-6 space-y-3">
+    <div className="relative z-30 bg-panel border border-border rounded-lg p-4 mb-6 space-y-3">
       <div className="flex flex-wrap gap-2 items-center">
         <span className="text-xs text-muted uppercase tracking-wider mr-1">Range</span>
         {RANGE_PRESETS.map((p) => (
@@ -271,9 +271,31 @@ function KeyedMultiSelect({
   onChange: (v: string[]) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
   const summary = values.length === 0 ? `All ${label.toLowerCase()}s` : `${values.length} selected`;
+
+  useEffect(() => {
+    if (!open) return;
+
+    const onPointerDown = (e: PointerEvent) => {
+      const root = rootRef.current;
+      if (!root || !(e.target instanceof Node) || root.contains(e.target)) return;
+      setOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+
+    document.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
   return (
-    <div className="relative">
+    <div ref={rootRef} className={clsx("relative", open && "z-50")}>
       <button
         onClick={() => setOpen((o) => !o)}
         className="bg-panel2 border border-border rounded px-2 py-1 text-xs hover:text-ink"
@@ -281,7 +303,7 @@ function KeyedMultiSelect({
         {label}: {summary}
       </button>
       {open && (
-        <div className="absolute z-10 mt-1 max-h-72 w-64 overflow-auto bg-panel2 border border-border rounded shadow-lg p-2 space-y-1">
+        <div className="absolute z-50 mt-1 max-h-72 w-64 overflow-auto bg-panel2 border border-border rounded shadow-lg p-2 space-y-1">
           <div className="flex gap-2 mb-1">
             <button
               onClick={() => onChange([])}

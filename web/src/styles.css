@@ -249,3 +249,17 @@ body {
   margin-top: 0.45rem; color: #8a93a3;
   font-family: "JetBrains Mono", Menlo, Consolas, monospace; font-size: 10px;
 }
+
+.log-loading-track {
+  position: relative; height: 6px; overflow: hidden; border-radius: 9999px;
+  background: #202632; border: 1px solid #343c4d;
+}
+.log-loading-fill {
+  position: absolute; top: 0; bottom: 0; left: -40%; width: 40%;
+  border-radius: inherit; background: linear-gradient(90deg, transparent, #6aa6ff, transparent);
+  animation: log-loading-slide 1.15s ease-in-out infinite;
+}
+@keyframes log-loading-slide {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(350%); }
+}

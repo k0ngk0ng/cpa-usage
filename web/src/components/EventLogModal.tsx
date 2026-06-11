@@ -234,9 +234,7 @@ export default function EventLogModal({ event, onClose }: Props) {
           </div>
         </header>
 
-        {loading && (
-          <div className="flex-1 grid place-items-center text-muted text-sm">Loading…</div>
-        )}
+        {loading && <LoadingLogView requestId={event.request_id} />}
         {!loading && err && (
           <div className="flex-1 grid place-items-center text-danger text-sm px-6 text-center">
             {err}
@@ -338,6 +336,30 @@ function modalMinSize(): { minWidth: number; minHeight: number } {
 
 function isInteractiveTarget(target: EventTarget): boolean {
   return target instanceof Element && !!target.closest("button, a, input, textarea, select, [data-no-drag]");
+}
+
+function LoadingLogView({ requestId }: { requestId: string }) {
+  return (
+    <div className="flex-1 grid place-items-center px-6">
+      <div className="w-full max-w-sm">
+        <div className="flex items-center justify-between gap-3 text-xs">
+          <span className="font-medium text-ink">Loading log...</span>
+          <span className="min-w-0 truncate font-mono text-[10px] text-muted" title={requestId}>
+            {requestId}
+          </span>
+        </div>
+        <div
+          className="log-loading-track mt-3"
+          role="progressbar"
+          aria-label="Loading request log"
+          aria-busy="true"
+        >
+          <div className="log-loading-fill" />
+        </div>
+        <div className="mt-3 text-[11px] text-muted">Large logs can take a moment.</div>
+      </div>
+    </div>
+  );
 }
 
 function buildTabs(entry: EventLogEntry | null, event: UsageEventRecord): Tab[] {
@@ -463,16 +485,10 @@ function eventRecordMap(event: UsageEventRecord): Record<string, string> {
     failed: event.failed ? "true" : "false",
     fail_status_code: event.fail_status_code ? String(event.fail_status_code) : "—",
     fail_body: displayValue(event.fail_body),
-    response_headers: formatHeaders(event.response_headers),
     reasoning_effort: displayValue(event.reasoning_effort),
     service_tier: displayValue(event.service_tier),
     cost: formatCost(event.cost),
   };
-}
-
-function formatHeaders(headers: Record<string, string[]> | undefined): string {
-  if (!headers || !Object.keys(headers).length) return "—";
-  return JSON.stringify(headers);
 }
 
 function displayValue(value: string | undefined | null): string {
