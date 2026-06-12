@@ -3,7 +3,7 @@ import clsx from "clsx";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api, HttpError } from "../api/client";
-import type { APIResponseAttempt, EventLogEntry, UsageEventRecord } from "../api/types";
+import type { APIResponseAttempt, EventLogEntry, EventLogProgress, UsageEventRecord } from "../api/types";
 import { formatBytes, formatCost, formatLatency, formatNumber, formatTimestamp } from "../lib/utils";
 import {
   displayableGeneratedImageURLFromPart,
@@ -46,6 +46,7 @@ export default function EventLogModal({ event, onClose }: Props) {
   const [missing, setMissing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>("info");
+  const [loadProgress, setLoadProgress] = useState<EventLogProgress | null>(null);
   const [rect, setRect] = useState<ModalRect>(() => initialModalRect());
   const interactionRef = useRef<ModalInteraction | null>(null);
   const bodyStyleRef = useRef<{ cursor: string; userSelect: string } | null>(null);
@@ -115,13 +116,21 @@ export default function EventLogModal({ event, onClose }: Props) {
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     setLoading(true);
     setErr(null);
     setMissing(false);
     setEntry(null);
+    setLoadProgress(null);
     setActiveTab("info");
     api
-      .eventLog(event.request_id)
+      .eventLog(
+        event.request_id,
+        (progress) => {
+          if (!cancelled) setLoadProgress(progress);
+        },
+        controller.signal,
+      )
       .then((res) => {
         if (cancelled) return;
         if (!res.found || !res.entry) {
@@ -139,6 +148,7 @@ export default function EventLogModal({ event, onClose }: Props) {
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [event.request_id]);
 
@@ -234,7 +244,7 @@ export default function EventLogModal({ event, onClose }: Props) {
           </div>
         </header>
 
-        {loading && <LoadingLogView requestId={event.request_id} />}
+        {loading && <LoadingLogView requestId={event.request_id} progress={loadProgress} />}
         {!loading && err && (
           <div className="flex-1 grid place-items-center text-danger text-sm px-6 text-center">
             {err}
@@ -338,7 +348,23 @@ function isInteractiveTarget(target: EventTarget): boolean {
   return target instanceof Element && !!target.closest("button, a, input, textarea, select, [data-no-drag]");
 }
 
-function LoadingLogView({ requestId }: { requestId: string }) {
+function LoadingLogView({
+  requestId,
+  progress,
+}: {
+  requestId: string;
+  progress: EventLogProgress | null;
+}) {
+  const total = progress?.totalBytes;
+  const loaded = progress?.loadedBytes ?? 0;
+  const percent = total && total > 0 ? Math.min(100, (loaded / total) * 100) : null;
+  const rate = progress ? formatBytes(progress.bytesPerSecond) + "/s" : "—";
+  const transferred = total
+    ? `${formatBytes(loaded)} / ${formatBytes(total)}`
+    : loaded > 0
+      ? `${formatBytes(loaded)} downloaded`
+      : "Waiting for response";
+
   return (
     <div className="flex-1 grid place-items-center px-6">
       <div className="w-full max-w-sm">
@@ -353,10 +379,23 @@ function LoadingLogView({ requestId }: { requestId: string }) {
           role="progressbar"
           aria-label="Loading request log"
           aria-busy="true"
+          aria-valuemin={percent == null ? undefined : 0}
+          aria-valuemax={percent == null ? undefined : 100}
+          aria-valuenow={percent == null ? undefined : Math.round(percent)}
         >
-          <div className="log-loading-fill" />
+          {percent == null ? (
+            <div className="log-loading-fill" />
+          ) : (
+            <div className="log-loading-fill-fixed" style={{ width: `${percent}%` }} />
+          )}
         </div>
-        <div className="mt-3 text-[11px] text-muted">Large logs can take a moment.</div>
+        <div className="mt-3 flex items-center justify-between gap-3 text-[11px] text-muted">
+          <span>{transferred}</span>
+          <span className="font-mono">{rate}</span>
+        </div>
+        <div className="mt-1 text-[11px] text-muted">
+          {percent == null ? "Total size is unavailable; showing live transfer." : `${percent.toFixed(1)}%`}
+        </div>
       </div>
     </div>
   );

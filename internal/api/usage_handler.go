@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -165,8 +166,18 @@ func usageEventLogHandler(deps UsageDeps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"found": true, "entry": entry})
+		writeJSONWithLength(c, http.StatusOK, gin.H{"found": true, "entry": entry})
 	}
+}
+
+func writeJSONWithLength(c *gin.Context, status int, value any) {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.Header("Content-Length", strconv.Itoa(len(payload)))
+	c.Data(status, "application/json; charset=utf-8", payload)
 }
 
 // usageImportHandler accepts a JSON snapshot exported from the legacy CPA

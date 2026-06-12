@@ -281,6 +281,13 @@ export interface EventLogResponse {
   entry?: EventLogEntry;
 }
 
+export interface EventLogProgress {
+  loadedBytes: number;
+  totalBytes?: number;
+  bytesPerSecond: number;
+  elapsedMs: number;
+}
+
 export interface ImportSnapshotResult {
   added: number;
   skipped: number;

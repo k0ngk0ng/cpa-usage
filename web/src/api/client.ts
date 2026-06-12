@@ -7,6 +7,7 @@ import type {
   BackfillResult,
   DrainStatus,
   EventLogResponse,
+  EventLogProgress,
   Filter,
   ImportSnapshotResult,
   ModelPriceSetting,
@@ -60,6 +61,93 @@ async function request<T>(
     headers,
   });
   const text = await res.text();
+  let parsed: unknown = null;
+  if (text) {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = text;
+    }
+  }
+  if (!res.ok) {
+    const message =
+      (parsed && typeof parsed === "object" && parsed !== null && "error" in parsed
+        ? String((parsed as { error: unknown }).error)
+        : res.statusText) || `HTTP ${res.status}`;
+    throw new HttpError(res.status, message, parsed);
+  }
+  return parsed as T;
+}
+
+type ProgressCallback = (progress: EventLogProgress) => void;
+
+async function requestWithProgress<T>(
+  path: string,
+  onProgress?: ProgressCallback,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (!onProgress) return request<T>(path);
+
+  const url = apiBase() + path;
+  const res = await fetch(url, { credentials: "same-origin", signal });
+  const total = parseContentLength(res.headers.get("Content-Length"));
+
+  if (!res.body) {
+    const text = await res.text();
+    onProgress(progressSnapshot(new TextEncoder().encode(text).byteLength, total, 0));
+    return parseResponse<T>(res, text);
+  }
+
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  const started = performance.now();
+  let loaded = 0;
+  onProgress(progressSnapshot(loaded, total, 0));
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    chunks.push(value);
+    loaded += value.byteLength;
+    onProgress(progressSnapshot(loaded, total, performance.now() - started));
+  }
+
+  const text = new TextDecoder().decode(joinChunks(chunks, loaded));
+  return parseResponse<T>(res, text);
+}
+
+function parseContentLength(raw: string | null): number | undefined {
+  if (!raw) return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
+function progressSnapshot(
+  loadedBytes: number,
+  totalBytes: number | undefined,
+  elapsedMs: number,
+): EventLogProgress {
+  const seconds = Math.max(elapsedMs / 1000, 0.001);
+  return {
+    loadedBytes,
+    totalBytes,
+    bytesPerSecond: loadedBytes / seconds,
+    elapsedMs,
+  };
+}
+
+function joinChunks(chunks: Uint8Array[], totalBytes: number): Uint8Array {
+  const out = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
+}
+
+function parseResponse<T>(res: Response, text: string): T {
   let parsed: unknown = null;
   if (text) {
     try {
@@ -158,10 +246,16 @@ export const api = {
       "/usage/events/filters" + buildQuery(filter),
     );
   },
-  async eventLog(requestId: string): Promise<EventLogResponse> {
+  async eventLog(
+    requestId: string,
+    onProgress?: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<EventLogResponse> {
     try {
-      return await request<EventLogResponse>(
+      return await requestWithProgress<EventLogResponse>(
         "/usage/events/" + encodeURIComponent(requestId) + "/log",
+        onProgress,
+        signal,
       );
     } catch (e) {
       if (e instanceof HttpError && e.status === 404) {
