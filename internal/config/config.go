@@ -43,7 +43,7 @@ type Config struct {
 
 	AuthEnabled   bool
 	LoginPassword string
-	SessionTTL    time.Duration
+	AuthTokenTTL  time.Duration
 	CookieName    string
 }
 
@@ -73,7 +73,7 @@ func Load() (*Config, error) {
 		LogHeaderMaxBytes: int64Or("LOG_HEADER_MAX_BYTES", 64*1024),
 		AuthEnabled:       boolOr("AUTH_ENABLED", false),
 		LoginPassword:     os.Getenv("LOGIN_PASSWORD"),
-		SessionTTL:        durationOr("AUTH_SESSION_TTL", 168*time.Hour),
+		AuthTokenTTL:      durationOr("AUTH_SESSION_TTL", 168*time.Hour),
 		CookieName:        strOr("AUTH_COOKIE_NAME", "cpa_usage_session"),
 	}
 	if cfg.CPABaseURL == "" {

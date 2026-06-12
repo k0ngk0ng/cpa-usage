@@ -1,87 +1,99 @@
-// Package auth implements an in-memory session manager for the optional password
-// login flow. Sessions are opaque random tokens kept in process memory; the
-// process restarting invalidates everyone (acceptable for v1).
+// Package auth implements the optional password login flow. Successful logins
+// receive stateless JWTs signed from the configured login password, so process
+// restarts do not invalidate existing browser cookies.
 package auth
 
 import (
-	"crypto/rand"
+	"crypto/hmac"
+	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/hex"
-	"sync"
+	"encoding/base64"
+	"encoding/json"
+	"strings"
 	"time"
 )
 
-// SessionManager tracks live sessions and their expiry.
-type SessionManager struct {
-	ttl      time.Duration
-	now      func() time.Time
-	generate func() (string, error)
-
-	mu       sync.RWMutex
-	sessions map[string]time.Time
+// TokenManager issues and validates stateless JWTs.
+type TokenManager struct {
+	ttl time.Duration
+	key []byte
+	now func() time.Time
 }
 
-// NewSessionManager builds a SessionManager with the supplied TTL.
-func NewSessionManager(ttl time.Duration) *SessionManager {
-	return &SessionManager{
-		ttl:      ttl,
-		now:      time.Now,
-		generate: generateToken,
-		sessions: make(map[string]time.Time),
+type jwtClaims struct {
+	Subject   string `json:"sub"`
+	IssuedAt  int64  `json:"iat"`
+	ExpiresAt int64  `json:"exp"`
+}
+
+// NewTokenManager builds a TokenManager with the supplied TTL and signing
+// secret. Tokens remain valid across process restarts as long as the secret
+// (currently the login password) is unchanged.
+func NewTokenManager(ttl time.Duration, secret string) *TokenManager {
+	key := sha256.Sum256([]byte("cpa-usage jwt signing key\x00" + secret))
+	return &TokenManager{
+		ttl: ttl,
+		key: key[:],
+		now: time.Now,
 	}
 }
 
-// Create issues a new session and returns the token + absolute expiry.
-func (m *SessionManager) Create() (string, time.Time, error) {
-	token, err := m.generate()
+// Create issues a new JWT and returns the token + absolute expiry.
+func (m *TokenManager) Create() (string, time.Time, error) {
+	now := m.now()
+	expires := now.Add(m.ttl)
+
+	header, err := json.Marshal(map[string]string{
+		"alg": "HS256",
+		"typ": "JWT",
+	})
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.cleanupLocked()
-	expires := m.now().Add(m.ttl)
-	m.sessions[token] = expires
-	return token, expires, nil
+	claims, err := json.Marshal(jwtClaims{
+		Subject:   "cpa-usage",
+		IssuedAt:  now.Unix(),
+		ExpiresAt: expires.Unix(),
+	})
+	if err != nil {
+		return "", time.Time{}, err
+	}
+
+	unsigned := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(claims)
+	return unsigned + "." + m.sign(unsigned), expires, nil
 }
 
-// Validate reports whether token is a known, unexpired session.
-func (m *SessionManager) Validate(token string) bool {
+// Validate reports whether token is a well-formed, signed, unexpired JWT.
+func (m *TokenManager) Validate(token string) bool {
 	if token == "" {
 		return false
 	}
-	m.mu.RLock()
-	expires, ok := m.sessions[token]
-	m.mu.RUnlock()
-	if !ok {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
 		return false
 	}
-	if !expires.After(m.now()) {
-		m.Delete(token)
+
+	unsigned := parts[0] + "." + parts[1]
+	if !hmac.Equal([]byte(parts[2]), []byte(m.sign(unsigned))) {
 		return false
 	}
-	return true
-}
 
-// Delete removes a session by token. No-op if the token is absent.
-func (m *SessionManager) Delete(token string) {
-	if token == "" {
-		return
+	claimsRaw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return false
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.sessions, token)
-}
-
-// CleanupExpired drops sessions whose expiry has passed.
-func (m *SessionManager) CleanupExpired() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.cleanupLocked()
+	var claims jwtClaims
+	if err := json.Unmarshal(claimsRaw, &claims); err != nil {
+		return false
+	}
+	if claims.Subject != "cpa-usage" || claims.ExpiresAt <= 0 {
+		return false
+	}
+	return time.Unix(claims.ExpiresAt, 0).After(m.now())
 }
 
 // TTL returns the configured TTL (used to set cookie max-age).
-func (m *SessionManager) TTL() time.Duration { return m.ttl }
+func (m *TokenManager) TTL() time.Duration { return m.ttl }
 
 // PasswordMatches performs a constant-time compare on the supplied password.
 func PasswordMatches(expected, supplied string) bool {
@@ -91,19 +103,8 @@ func PasswordMatches(expected, supplied string) bool {
 	return subtle.ConstantTimeCompare([]byte(expected), []byte(supplied)) == 1
 }
 
-func (m *SessionManager) cleanupLocked() {
-	now := m.now()
-	for tok, exp := range m.sessions {
-		if !exp.After(now) {
-			delete(m.sessions, tok)
-		}
-	}
-}
-
-func generateToken() (string, error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(buf), nil
+func (m *TokenManager) sign(unsigned string) string {
+	mac := hmac.New(sha256.New, m.key)
+	_, _ = mac.Write([]byte(unsigned))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }

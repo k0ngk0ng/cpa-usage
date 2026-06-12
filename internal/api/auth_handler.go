@@ -11,11 +11,11 @@ import (
 
 // AuthDeps wires together the auth handler/middleware dependencies.
 type AuthDeps struct {
-	Enabled       bool
-	Password      string
-	CookieName    string
-	BasePath      string
-	Sessions      *auth.SessionManager
+	Enabled    bool
+	Password   string
+	CookieName string
+	BasePath   string
+	Tokens     *auth.TokenManager
 }
 
 // loginRequest is the JSON body of POST /auth/login.
@@ -23,7 +23,7 @@ type loginRequest struct {
 	Password string `json:"password"`
 }
 
-// sessionResponse describes the public session shape (no token).
+// sessionResponse describes the public auth state (no token).
 type sessionResponse struct {
 	Authenticated bool `json:"authenticated"`
 	AuthRequired  bool `json:"auth_required"`
@@ -33,8 +33,8 @@ func sessionHandler(deps AuthDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ok := true
 		if deps.Enabled {
-			token := readSessionToken(c, deps.CookieName)
-			ok = token != "" && deps.Sessions.Validate(token)
+			token := readAuthToken(c, deps.CookieName)
+			ok = token != "" && deps.Tokens.Validate(token)
 		}
 		c.JSON(http.StatusOK, sessionResponse{Authenticated: ok, AuthRequired: deps.Enabled})
 	}
@@ -55,28 +55,24 @@ func loginHandler(deps AuthDeps) gin.HandlerFunc {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid password"})
 			return
 		}
-		token, expires, err := deps.Sessions.Create()
+		token, expires, err := deps.Tokens.Create()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "session creation failed"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "token creation failed"})
 			return
 		}
-		setSessionCookie(c, deps, token, int(deps.Sessions.TTL().Seconds()))
+		setAuthCookie(c, deps, token, int(deps.Tokens.TTL().Seconds()))
 		c.JSON(http.StatusOK, gin.H{"authenticated": true, "expires_at": expires})
 	}
 }
 
 func logoutHandler(deps AuthDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		token := readSessionToken(c, deps.CookieName)
-		if token != "" {
-			deps.Sessions.Delete(token)
-		}
-		setSessionCookie(c, deps, "", -1)
+		setAuthCookie(c, deps, "", -1)
 		c.JSON(http.StatusOK, gin.H{"authenticated": false})
 	}
 }
 
-// authMiddleware returns a gin middleware enforcing session presence when auth
+// authMiddleware returns a gin middleware enforcing token presence when auth
 // is enabled. When auth is disabled the middleware is a no-op.
 func authMiddleware(deps AuthDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -84,8 +80,8 @@ func authMiddleware(deps AuthDeps) gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		token := readSessionToken(c, deps.CookieName)
-		if token == "" || !deps.Sessions.Validate(token) {
+		token := readAuthToken(c, deps.CookieName)
+		if token == "" || !deps.Tokens.Validate(token) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 			return
 		}
@@ -93,7 +89,7 @@ func authMiddleware(deps AuthDeps) gin.HandlerFunc {
 	}
 }
 
-func readSessionToken(c *gin.Context, cookieName string) string {
+func readAuthToken(c *gin.Context, cookieName string) string {
 	v, err := c.Cookie(cookieName)
 	if err != nil {
 		return ""
@@ -101,7 +97,7 @@ func readSessionToken(c *gin.Context, cookieName string) string {
 	return strings.TrimSpace(v)
 }
 
-func setSessionCookie(c *gin.Context, deps AuthDeps, token string, maxAge int) {
+func setAuthCookie(c *gin.Context, deps AuthDeps, token string, maxAge int) {
 	cookiePath := deps.BasePath
 	if cookiePath == "" {
 		cookiePath = "/"

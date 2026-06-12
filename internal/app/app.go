@@ -89,7 +89,7 @@ func New(cfg *config.Config, build BuildInfo) (*App, error) {
 		MetadataInterval: cfg.MetadataInterval,
 	})
 
-	sessions := auth.NewSessionManager(cfg.SessionTTL)
+	tokens := auth.NewTokenManager(cfg.AuthTokenTTL, cfg.LoginPassword)
 
 	router := api.New(api.RouterConfig{
 		BasePath: cfg.AppBasePath,
@@ -104,7 +104,7 @@ func New(cfg *config.Config, build BuildInfo) (*App, error) {
 			Password:   cfg.LoginPassword,
 			CookieName: cfg.CookieName,
 			BasePath:   cfg.AppBasePath,
-			Sessions:   sessions,
+			Tokens:     tokens,
 		},
 		Usage: api.UsageDeps{
 			Service: usageSvc,

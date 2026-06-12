@@ -10,7 +10,7 @@ CPA v6.10 removed the legacy `/v0/management/usage/{export,import}` HTTP endpoin
 - Periodically refreshes auth-files and provider catalogs from CPA management API
 - Computes per-model cost from configurable price-per-1M-token settings
 - Serves an API + SPA at `/usage/*` (subpath configurable)
-- Optional cookie-based password login
+- Optional JWT cookie-based password login
 - Daily 03:00 retention sweep (drops events older than 30 days, then `VACUUM`)
 
 ## Quick start (development)
@@ -75,7 +75,7 @@ All configuration is via environment variables (also see `.env.example`):
 | `METADATA_SYNC_INTERVAL` | `30s` | |
 | `AUTH_ENABLED` | `false` | When true, `LOGIN_PASSWORD` is required |
 | `LOGIN_PASSWORD` | — | Required if `AUTH_ENABLED=true` |
-| `AUTH_SESSION_TTL` | `168h` | |
+| `AUTH_SESSION_TTL` | `168h` | JWT cookie lifetime |
 | `LOG_LEVEL` | `info` | |
 | `LOG_FILE_ENABLED` | `true` | |
 | `LOG_DIR` | `./logs` | Resolved against the process working directory |
@@ -83,12 +83,12 @@ All configuration is via environment variables (also see `.env.example`):
 
 ## API surface
 
-All endpoints are mounted under `<APP_BASE_PATH>/api/v1`. Protected endpoints require a valid session cookie when `AUTH_ENABLED=true`.
+All endpoints are mounted under `<APP_BASE_PATH>/api/v1`. Protected endpoints require a valid JWT auth cookie when `AUTH_ENABLED=true`.
 
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/ping` | liveness + version |
-| GET | `/auth/session` | session status |
+| GET | `/auth/session` | auth status |
 | POST | `/auth/login` | `{ "password": "..." }` |
 | POST | `/auth/logout` | clear cookie |
 | GET | `/status` | drain status (last pop, errors, totals) |
@@ -141,7 +141,7 @@ cmd/server/             entrypoint (ldflag-injected version)
 internal/
   api/                  gin router + handlers + embedded SPA
   app/                  composition root + maintenance loop
-  auth/                 in-memory session manager
+  auth/                 password auth + JWT token manager
   config/               env loader
   cpa/                  CPA HTTP client + RESP redis client
   drain/                pop/decode/insert + metadata orchestration
