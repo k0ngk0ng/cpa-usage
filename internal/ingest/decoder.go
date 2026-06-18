@@ -30,6 +30,7 @@ func Decode(message string) (storage.UsageEvent, error) {
 	if ts.IsZero() {
 		ts = time.Now().UTC()
 	}
+	tokens := normalizeUsageTokens(rec)
 	return storage.UsageEvent{
 		EventKey:            requestID,
 		Timestamp:           ts.UTC(),
@@ -45,13 +46,13 @@ func Decode(message string) (storage.UsageEvent, error) {
 		RequestID:           requestID,
 		LatencyMs:           rec.LatencyMs,
 		TTFTMs:              rec.TTFTMs,
-		InputTokens:         rec.Tokens.InputTokens,
-		OutputTokens:        rec.Tokens.OutputTokens,
-		ReasoningTokens:     rec.Tokens.ReasoningTokens,
-		CachedTokens:        rec.Tokens.CachedTokens,
-		CacheReadTokens:     rec.Tokens.CacheReadTokens,
-		CacheCreationTokens: rec.Tokens.CacheCreationTokens,
-		TotalTokens:         rec.Tokens.TotalTokens,
+		InputTokens:         tokens.InputTokens,
+		OutputTokens:        tokens.OutputTokens,
+		ReasoningTokens:     tokens.ReasoningTokens,
+		CachedTokens:        tokens.CachedTokens,
+		CacheReadTokens:     tokens.CacheReadTokens,
+		CacheCreationTokens: tokens.CacheCreationTokens,
+		TotalTokens:         tokens.TotalTokens,
 		Failed:              rec.Failed,
 		FailStatusCode:      rec.Fail.StatusCode,
 		FailBody:            strings.TrimSpace(rec.Fail.Body),
@@ -92,6 +93,49 @@ func resolveAPIGroupKey(rec cpa.UsageRecord) string {
 		return v
 	}
 	return "unknown"
+}
+
+func normalizeUsageTokens(rec cpa.UsageRecord) cpa.UsageTokens {
+	tokens := rec.Tokens
+	if isClaudeStyleUsage(rec) {
+		if tokens.CacheReadTokens != 0 || tokens.CacheCreationTokens != 0 {
+			tokens.CachedTokens = tokens.CacheReadTokens
+		}
+		return tokens
+	}
+
+	cacheRead := tokens.CacheReadTokens
+	if cacheRead == 0 {
+		cacheRead = tokens.CachedTokens
+	}
+	cacheWrite := tokens.CacheCreationTokens
+	cachedInput := cacheRead + cacheWrite
+	if cachedInput > 0 {
+		tokens.InputTokens = subtractFloor(tokens.InputTokens, cachedInput)
+		tokens.CachedTokens = cacheRead
+		tokens.CacheReadTokens = cacheRead
+	}
+	return tokens
+}
+
+func isClaudeStyleUsage(rec cpa.UsageRecord) bool {
+	for _, value := range []string{rec.Provider, rec.Model, rec.Endpoint} {
+		v := strings.ToLower(strings.TrimSpace(value))
+		if strings.Contains(v, "claude") || strings.Contains(v, "anthropic") {
+			return true
+		}
+	}
+	return false
+}
+
+func subtractFloor(value, delta int64) int64 {
+	if delta <= 0 {
+		return value
+	}
+	if value <= delta {
+		return 0
+	}
+	return value - delta
 }
 
 func compactRawJSON(raw json.RawMessage) string {
