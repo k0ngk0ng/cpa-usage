@@ -61,6 +61,7 @@ body {
 }
 .role-badge-user { color: #9ec5ff; background: #13294b; border-color: #315f9f; }
 .role-badge-assistant { color: #9ee6c7; background: #12362d; border-color: #2a7a62; }
+.role-badge-agent { color: #9edcf2; background: #12303a; border-color: #2b6f82; }
 .role-badge-system { color: #e6c98f; background: #3a2b10; border-color: #7e6124; }
 .role-badge-tool { color: #d0b4ff; background: #2d1f49; border-color: #674aa1; }
 .role-badge-muted { color: #c9d0dc; background: #202632; border-color: #3b4454; }
@@ -77,12 +78,18 @@ body {
 }
 .chat-row-left { justify-content: flex-start; }
 .chat-row-user { justify-content: flex-end; }
+.chat-row-user-question { scroll-margin-top: 5rem; }
+.chat-row-located .chat-bubble-user {
+  outline: 2px solid #6aa6ff; outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgb(106 166 255 / 12%);
+}
 .chat-bubble {
   max-width: min(78%, 820px); border: 1px solid #262b36; border-radius: 8px;
   padding: 0.65rem 0.8rem; background: #121722;
 }
 .chat-bubble-user { background: #10213a; border-color: #2a568f; }
 .chat-bubble-assistant { background: #102820; border-color: #25624f; }
+.chat-bubble-agent { background: #10252d; border-color: #285f70; }
 .chat-bubble-system { background: #2b210f; border-color: #6d5420; }
 .chat-bubble-tool { background: #211837; border-color: #543d87; }
 .chat-bubble-muted { background: #171c26; border-color: #343c4d; }
@@ -111,6 +118,63 @@ body {
 .chat-toggle-active {
   color: #e7eaf0; background: #2a3140;
 }
+.chat-user-nav-button,
+.chat-user-nav-current {
+  height: 24px; border: 1px solid #3b4454; border-radius: 4px;
+  color: #c9d0dc; background: #171c26; font-size: 10px; line-height: 1;
+}
+.chat-user-nav-button {
+  width: 24px; padding: 0;
+}
+.chat-user-nav-current {
+  min-width: 70px; padding: 0 0.45rem; color: #9ec5ff;
+  border-color: #315f9f; background: #10213a;
+  font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+}
+.chat-user-nav-button:hover,
+.chat-user-nav-current:hover {
+  color: #e7eaf0; background: #2a3140;
+}
+.final-search-controls {
+  display: flex; align-items: center; gap: 0.25rem; flex: 1 1 230px;
+  min-width: 190px; max-width: 430px; margin-left: 0.35rem;
+}
+.final-search-input {
+  min-width: 80px; height: 24px; flex: 1 1 auto; border: 1px solid #3b4454;
+  border-radius: 4px; background: #0f141d; color: #e7eaf0;
+  padding: 0 0.45rem; font-size: 10px; outline: none;
+}
+.final-search-input:focus {
+  border-color: #6aa6ff; box-shadow: 0 0 0 1px rgb(106 166 255 / 20%);
+}
+.final-search-input::-webkit-search-cancel-button { display: none; }
+.final-search-button,
+.final-search-count {
+  height: 24px; border: 1px solid #3b4454; border-radius: 4px;
+  color: #c9d0dc; background: #171c26; font-size: 10px; line-height: 1;
+}
+.final-search-button { width: 24px; padding: 0; }
+.final-search-count {
+  min-width: 48px; padding: 0 0.35rem;
+  font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+}
+.final-search-button:hover:not(:disabled),
+.final-search-count:hover:not(:disabled) {
+  color: #e7eaf0; background: #2a3140;
+}
+.final-search-button:disabled,
+.final-search-count:disabled {
+  cursor: not-allowed; opacity: 0.4;
+}
+.final-search-current-block {
+  outline: 1px solid #f59e0b; outline-offset: 2px;
+}
+::highlight(final-search-match) {
+  color: inherit; background: rgb(250 204 21 / 38%);
+}
+::highlight(final-search-active) {
+  color: #0b0d11; background: #f59e0b;
+}
 .chat-preview {
   color: #c9d0dc; font-family: "JetBrains Mono", Menlo, Consolas, monospace;
   font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -128,6 +192,15 @@ body {
 .chat-body.prose-md > :last-child { margin-bottom: 0; }
 .chat-parts {
   display: flex; flex-direction: column; gap: 0.65rem;
+}
+.agent-message-meta {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem;
+  padding-bottom: 0.5rem; border-bottom: 1px solid #28505d;
+}
+.agent-message-meta .part-type-badge { margin: 0; }
+.agent-message-route {
+  color: #9edcf2; font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: 10px; overflow-wrap: anywhere;
 }
 .chat-part-text.prose-md {
   font-size: 12px;

@@ -48,7 +48,10 @@ export function extractRequestTurns(rawJson: string): Turn[] | null {
     // function_call_output, reasoning, etc. Top-level non-message items
     // don't have role/content, so messageToTurn would render them as
     // "user (empty)". Hand them off to a dedicated converter.
-    for (const m of o.input) turns.push(responsesInputToTurn(m));
+    for (const m of o.input) {
+      const turn = responsesInputToTurn(m);
+      if (turn) turns.push(turn);
+    }
   }
   if (Array.isArray(o.contents)) {
     for (const m of o.contents) turns.push(geminiContentToTurn(m));
@@ -66,7 +69,22 @@ export function extractRequestToolDeclarations(rawJson: string): Turn | null {
   }
   if (!obj || typeof obj !== "object") return null;
   const o = obj as Record<string, unknown>;
-  return toolDeclarationTurn(o.tools);
+  return toolDeclarationTurn(requestToolDeclarations(o));
+}
+
+function requestToolDeclarations(request: Record<string, unknown>): unknown[] {
+  const tools: unknown[] = [];
+  if (Array.isArray(request.tools)) tools.push(...request.tools);
+  if (Array.isArray(request.input)) {
+    for (const item of request.input) {
+      if (!item || typeof item !== "object") continue;
+      const inputItem = item as Record<string, unknown>;
+      if (inputItem.type === "additional_tools" && Array.isArray(inputItem.tools)) {
+        tools.push(...inputItem.tools);
+      }
+    }
+  }
+  return tools;
 }
 
 function appendInstructionTurn(turns: Turn[], role: string, key: string, raw: unknown) {
@@ -123,6 +141,8 @@ function messageToTurn(raw: unknown): Turn {
         }
       } else if (type === "redacted_thinking") {
         append(hiddenTypeText(type));
+      } else if (type === "encrypted_content") {
+        append(hiddenTypeText(type));
       } else if (type === "tool_use") {
         const name = String(p.name || "tool");
         const input = JSON.stringify(p.input ?? {}, null, 2);
@@ -174,7 +194,10 @@ function toolCallMarkdown(raw: unknown, index: number): string {
   }
   const call = raw as Record<string, unknown>;
   const fn = objectValue(call.function);
-  const name = stringValue(fn?.name) || stringValue(call.name) || stringValue(call.type) || `tool_${index + 1}`;
+  const name = qualifiedToolName(
+    call,
+    stringValue(fn?.name) || stringValue(call.type) || `tool_${index + 1}`,
+  );
   const args = fn && "arguments" in fn ? fn.arguments : call.arguments ?? call.input ?? call;
   const input = typeof args === "string" ? formatPartialJSON(args) : JSON.stringify(args ?? {}, null, 2);
   return toolUseMarkdown(name, call.id ?? call.call_id ?? call.tool_call_id, input, "json");
@@ -183,7 +206,7 @@ function toolCallMarkdown(raw: unknown, index: number): string {
 function legacyFunctionCallMarkdown(raw: unknown): string {
   const call = objectValue(raw);
   if (!call) return "";
-  const name = stringValue(call.name) || "function";
+  const name = qualifiedToolName(call, "function");
   const args = "arguments" in call ? call.arguments : call;
   const input = typeof args === "string" ? formatPartialJSON(args) : JSON.stringify(args ?? {}, null, 2);
   return toolUseMarkdown(name, undefined, input, "json");
@@ -228,6 +251,11 @@ function toolDeclarationLabel(tool: unknown, index: number): string {
   const fn = objectValue(o.function);
   const name = stringValue(o.name) || stringValue(fn?.name);
   const type = stringValue(o.type);
+  if (type === "namespace") {
+    const count = Array.isArray(o.tools) ? o.tools.length : 0;
+    const suffix = count ? ` · ${count} tool${count === 1 ? "" : "s"}` : "";
+    return `${name || `namespace ${index + 1}`} (namespace${suffix})`;
+  }
   const label = name || type || `tool ${index + 1}`;
   return type && name && type !== name ? `${name} (${type})` : label;
 }
@@ -407,6 +435,13 @@ function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+function qualifiedToolName(item: Record<string, unknown>, fallback: string): string {
+  const name = stringValue(item.name) || fallback;
+  const namespace = stringValue(item.namespace);
+  if (!namespace || !name || name.startsWith(namespace + ".")) return name;
+  return `${namespace}.${name}`;
+}
+
 function hasEncryptedReasoning(o: Record<string, unknown>): boolean {
   return (
     typeof o.encrypted_content === "string" ||
@@ -428,14 +463,21 @@ function markHidden(out: { encrypted?: boolean; hiddenType?: string }, type: str
 // shape. Items with type=message fall back to messageToTurn; tool call
 // and tool output items are rendered as their own assistant/user
 // turns so they don't show up as "user (empty)".
-function responsesInputToTurn(raw: unknown): Turn {
+function responsesInputToTurn(raw: unknown): Turn | null {
   const m = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const type = stringValue(m.type);
   if (!type || type === "message") {
     return messageToTurn(raw);
   }
+  if (type === "additional_tools") {
+    return null;
+  }
+  if (type === "agent_message") {
+    const turn = messageToTurn({ ...m, role: "agent" });
+    return { ...turn, role: "agent", raw: m };
+  }
   if (type === "function_call") {
-    const name = String(m.name || "tool");
+    const name = qualifiedToolName(m, "tool");
     const args = typeof m.arguments === "string" ? m.arguments : JSON.stringify(m.arguments ?? {});
     const json = formatPartialJSON(args);
     return {
@@ -445,7 +487,7 @@ function responsesInputToTurn(raw: unknown): Turn {
     };
   }
   if (type === "custom_tool_call") {
-    const name = String(m.name || "tool");
+    const name = qualifiedToolName(m, "tool");
     const input = typeof m.input === "string" ? m.input : JSON.stringify(m.input ?? "", null, 2);
     return {
       role: "assistant",
@@ -454,10 +496,10 @@ function responsesInputToTurn(raw: unknown): Turn {
     };
   }
   if (type === "function_call_output" || type === "custom_tool_call_output") {
-    const out = typeof m.output === "string" ? m.output : JSON.stringify(m.output ?? "", null, 2);
+    const out = toolResultContentToMarkdown(m.output, "tool result image");
     return {
       role: "user",
-      text: toolResultMarkdown(m.call_id, out),
+      text: `**[tool_result${callIDSuffix(m.call_id)}]**\n\n${out}`,
       raw: m,
     };
   }
@@ -589,7 +631,8 @@ function callIDSuffix(rawCallID: unknown): string {
 }
 
 function customToolLanguage(name: string, input: string): string {
-  if (name === "apply_patch" || input.trimStart().startsWith("*** Begin Patch")) return "patch";
+  const bareName = name.split(".").pop() || name;
+  if (bareName === "apply_patch" || input.trimStart().startsWith("*** Begin Patch")) return "patch";
   return "";
 }
 
@@ -635,6 +678,7 @@ export interface StreamExtraction {
   errors: string[];
   raw?: unknown;
   rawContent?: unknown[];
+  rawOutput?: unknown[];
 }
 
 interface OpenAIImageGeneration {
@@ -683,6 +727,7 @@ export function extractResponseStream(text: string): StreamExtraction {
   }
   const openAICalls = new Map<number, OpenAICall>();
   const openAIImages = new Map<number, OpenAIImageGeneration>();
+  const openAIOutputItems = new Map<number, Record<string, unknown>>();
   let openAIItemOrder = 0;
 
   // CPA logs the SSE stream as-is plus a leading "Status: 200" / header
@@ -815,29 +860,28 @@ export function extractResponseStream(text: string): StreamExtraction {
     }
     if (o.type === "response.output_item.added") {
       const item = (o.item as Record<string, unknown>) || {};
+      const idx = typeof o.output_index === "number" ? (o.output_index as number) : -1;
+      openAIOutputItems.set(idx, item);
       if (item.type === "function_call") {
-        const idx = typeof o.output_index === "number" ? (o.output_index as number) : -1;
         const existing = openAICalls.get(idx);
         const partial = typeof item.arguments === "string" ? (item.arguments as string) : "";
         openAICalls.set(idx, {
-          name: typeof item.name === "string" ? (item.name as string) : existing?.name || "tool",
+          name: qualifiedToolName(item, existing?.name || "tool"),
           callID: typeof item.call_id === "string" ? (item.call_id as string) : existing?.callID || "",
           args: (existing?.args || "") + partial,
           order: existing?.order ?? openAIItemOrder++,
         });
       } else if (item.type === "custom_tool_call") {
-        const idx = typeof o.output_index === "number" ? (o.output_index as number) : -1;
         const existing = openAICalls.get(idx);
         const partial = typeof item.input === "string" ? (item.input as string) : "";
         openAICalls.set(idx, {
-          name: typeof item.name === "string" ? (item.name as string) : existing?.name || "tool",
+          name: qualifiedToolName(item, existing?.name || "tool"),
           callID: typeof item.call_id === "string" ? (item.call_id as string) : existing?.callID || "",
           args: (existing?.args || "") + partial,
           order: existing?.order ?? openAIItemOrder++,
           custom: true,
         });
       } else if (item.type === "image_generation_call") {
-        const idx = typeof o.output_index === "number" ? (o.output_index as number) : -1;
         const existing = openAIImages.get(idx);
         openAIImages.set(idx, {
           order: existing?.order ?? openAIItemOrder++,
@@ -853,6 +897,7 @@ export function extractResponseStream(text: string): StreamExtraction {
     if (o.type === "response.output_item.done") {
       const item = (o.item as Record<string, unknown>) || {};
       const idx = typeof o.output_index === "number" ? (o.output_index as number) : -1;
+      openAIOutputItems.set(idx, item);
       const existing = openAICalls.get(idx);
       const itemType = stringValue(item.type);
       if (item.type === "function_call" || item.type === "custom_tool_call") {
@@ -861,7 +906,7 @@ export function extractResponseStream(text: string): StreamExtraction {
             ? stringValue(item.input)
             : stringValue(item.arguments);
         openAICalls.set(idx, {
-          name: stringValue(item.name) || existing?.name || "tool",
+          name: qualifiedToolName(item, existing?.name || "tool"),
           callID: stringValue(item.call_id) || existing?.callID || "",
           args: input || existing?.args || "",
           order: existing?.order ?? openAIItemOrder++,
@@ -1006,6 +1051,37 @@ export function extractResponseStream(text: string): StreamExtraction {
     appendResponseMarkdown(out, item.markdown);
   }
 
+  if (openAIOutputItems.size > 0) {
+    out.rawOutput = [...openAIOutputItems.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([index, item]) => {
+        const itemType = stringValue(item.type);
+        const call = openAICalls.get(index);
+        if (call && (itemType === "function_call" || itemType === "custom_tool_call")) {
+          const key = itemType === "custom_tool_call" ? "input" : "arguments";
+          const existing = stringValue(item[key]);
+          const recovered = call.args.length >= existing.length ? call.args : existing;
+          return {
+            ...item,
+            name: stringValue(item.name) || call.name,
+            call_id: stringValue(item.call_id) || call.callID,
+            [key]: recovered,
+          };
+        }
+        const image = openAIImages.get(index);
+        if (image && itemType === "image_generation_call") {
+          return {
+            ...item,
+            ...(image.result ? { result: image.result } : {}),
+            ...(!image.result && image.partial ? { partial: image.partial } : {}),
+            ...(image.mimeType ? { mime_type: image.mimeType } : {}),
+            ...(image.outputFormat ? { output_format: image.outputFormat } : {}),
+          };
+        }
+        return item;
+      });
+  }
+
   if (out.detected) {
     out.raw = responseStreamRaw(completedResponse ?? latestResponse, out);
   }
@@ -1022,7 +1098,7 @@ function responseStreamRaw(
     if (Array.isArray(output) && output.length > 0) return response;
     return {
       ...response,
-      output: synthesizedResponseOutput(extraction),
+      output: extraction.rawOutput?.length ? extraction.rawOutput : synthesizedResponseOutput(extraction),
     };
   }
   return synthesizedAssistantResponse(extraction);
@@ -1061,7 +1137,7 @@ function synthesizedAssistantResponse(extraction: StreamExtraction): Record<stri
   return {
     role: "assistant",
     content: extraction.rawContent ?? content,
-    output: synthesizedResponseOutput(extraction),
+    output: extraction.rawOutput?.length ? extraction.rawOutput : synthesizedResponseOutput(extraction),
     ...(thinking ? { thinking } : {}),
     ...(extraction.hiddenType ? { hidden_type: extraction.hiddenType } : {}),
     ...(extraction.encrypted ? { encrypted: true } : {}),
@@ -1184,7 +1260,7 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
       if (!item || typeof item !== "object") continue;
       const it = item as Record<string, unknown>;
       if (it.type === "function_call") {
-        const name = String(it.name || "tool");
+        const name = qualifiedToolName(it, "tool");
         const args = typeof it.arguments === "string" ? (it.arguments as string) : JSON.stringify(it.arguments ?? {});
         const json = formatPartialJSON(args);
         const sep = out.content ? "\n\n" : "";
@@ -1193,7 +1269,7 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
         continue;
       }
       if (it.type === "custom_tool_call") {
-        const name = String(it.name || "tool");
+        const name = qualifiedToolName(it, "tool");
         const input = typeof it.input === "string" ? it.input : JSON.stringify(it.input ?? "", null, 2);
         const sep = out.content ? "\n\n" : "";
         out.content += sep + functionCallMarkdown("custom_tool_call", name, it.call_id, input, customToolLanguage(name, input));

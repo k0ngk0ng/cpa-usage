@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -611,7 +611,10 @@ function APIResponseAttemptView({ attempt }: { attempt: APIResponseAttempt }) {
 // (header + tabs) anchored.
 function Panel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="h-full bg-panel2 border border-border rounded p-3 overflow-y-auto text-xs">
+    <div
+      className="h-full bg-panel2 border border-border rounded p-3 overflow-y-auto text-xs"
+      data-event-log-scroll
+    >
       {children}
     </div>
   );
@@ -642,14 +645,17 @@ function KVList({ map }: { map: Record<string, string> }) {
   );
 }
 
-function CodeBlock({ text }: { text: string }) {
+const CodeBlock = memo(function CodeBlock({ text }: { text: string }) {
   const pretty = tryPrettyJson(text);
   return (
-    <pre className="bg-panel border border-border rounded p-3 font-mono text-[11px] whitespace-pre-wrap break-words">
+    <pre
+      className="bg-panel border border-border rounded p-3 font-mono text-[11px] whitespace-pre-wrap break-words"
+      data-final-search-block
+    >
       {pretty || <span className="text-muted">—</span>}
     </pre>
   );
-}
+});
 
 // BodyView toggles between a markdown projection of the protocol envelope and
 // the raw bytes. For requests we extract conversation turns; for responses we
@@ -772,19 +778,167 @@ function FinalChatView({
   responseTruncated?: boolean;
 }) {
   const turns = useMemo(() => finalChatTurns(requestRaw, responseRaw), [requestRaw, responseRaw]);
+  const userTurnIndexes = useMemo(
+    () => turns.flatMap((turn, index) => (isUserQuestionTurn(turn) ? [index] : [])),
+    [turns],
+  );
   const [mode, setMode] = useState<"pretty" | "raw">(turns.length ? "pretty" : "raw");
+  const [selectedUserPosition, setSelectedUserPosition] = useState(() => userTurnIndexes.length - 1);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchNeedle, setSearchNeedle] = useState("");
+  const [searchRevision, setSearchRevision] = useState(0);
+  const [searchMatchCount, setSearchMatchCount] = useState(0);
+  const [searchLimitReached, setSearchLimitReached] = useState(false);
+  const [activeSearchIndex, setActiveSearchIndex] = useState(-1);
+  const chatRef = useRef<HTMLDivElement>(null);
+  const searchRootRef = useRef<HTMLDivElement>(null);
+  const searchMatchesRef = useRef<FinalSearchMatch[]>([]);
+  const activeSearchIndexRef = useRef(-1);
+  const searchDebounceRef = useRef<number | null>(null);
+
+  const invalidateSearch = useCallback(() => {
+    activeSearchIndexRef.current = -1;
+    searchMatchesRef.current = [];
+    setActiveSearchIndex(-1);
+    setSearchMatchCount(0);
+    setSearchLimitReached(false);
+    clearFinalSearchHighlights(searchRootRef.current || undefined);
+  }, []);
 
   useEffect(() => {
-    if (!turns.length && mode === "pretty") setMode("raw");
-  }, [turns.length, mode]);
+    if (!turns.length && mode === "pretty") {
+      invalidateSearch();
+      setMode("raw");
+    }
+  }, [turns.length, mode, invalidateSearch]);
+
+  useEffect(() => {
+    setSelectedUserPosition(userTurnIndexes.length - 1);
+  }, [userTurnIndexes]);
+
+  const rebuildSearch = useCallback(() => {
+    const root = searchRootRef.current;
+    if (!root) return;
+    const result = collectFinalSearchMatches(root, searchNeedle, MAX_FINAL_SEARCH_MATCHES);
+    searchMatchesRef.current = result.matches;
+    setSearchMatchCount(result.matches.length);
+    setSearchLimitReached(result.limitReached);
+
+    let nextIndex = activeSearchIndexRef.current;
+    if (result.matches.length === 0) nextIndex = -1;
+    else if (nextIndex >= result.matches.length) nextIndex = result.matches.length - 1;
+    activeSearchIndexRef.current = nextIndex;
+    setActiveSearchIndex(nextIndex);
+    applyFinalSearchHighlights(root, result.matches, nextIndex);
+  }, [searchNeedle, searchRevision]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(rebuildSearch);
+    return () => window.cancelAnimationFrame(frame);
+  }, [mode, rebuildSearch, turns]);
+
+  useEffect(() => {
+    const root = searchRootRef.current;
+    if (!root) return;
+    let frame = 0;
+    const observer = new MutationObserver((mutations) => {
+      if (!mutations.some(mutationAffectsFinalSearch)) return;
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(rebuildSearch);
+    });
+    observer.observe(root, { childList: true, characterData: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      window.cancelAnimationFrame(frame);
+    };
+  }, [rebuildSearch]);
+
+  useEffect(() => {
+    return () => {
+      if (searchDebounceRef.current != null) {
+        window.clearTimeout(searchDebounceRef.current);
+      }
+      clearFinalSearchHighlights();
+    };
+  }, []);
+
+  const jumpToUser = (position: number) => {
+    if (!userTurnIndexes.length) return;
+    const wrappedPosition = (position + userTurnIndexes.length) % userTurnIndexes.length;
+    const turnIndex = userTurnIndexes[wrappedPosition];
+    setSelectedUserPosition(wrappedPosition);
+    chatRef.current
+      ?.querySelector<HTMLElement>(`[data-chat-turn-index="${turnIndex}"]`)
+      ?.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
+  };
+
+  const selectedUserTurnIndex = userTurnIndexes[selectedUserPosition];
+  const changeMode = (nextMode: "pretty" | "raw") => {
+    if (nextMode === mode) return;
+    invalidateSearch();
+    if (searchDebounceRef.current != null) {
+      window.clearTimeout(searchDebounceRef.current);
+      searchDebounceRef.current = null;
+    }
+    setSearchNeedle(searchQuery);
+    setSearchRevision((revision) => revision + 1);
+    setMode(nextMode);
+  };
+  const updateSearchQuery = (value: string) => {
+    invalidateSearch();
+    setSearchQuery(value);
+    if (searchDebounceRef.current != null) {
+      window.clearTimeout(searchDebounceRef.current);
+    }
+    searchDebounceRef.current = window.setTimeout(() => {
+      setSearchNeedle(value);
+      setSearchRevision((revision) => revision + 1);
+      searchDebounceRef.current = null;
+    }, 120);
+  };
+  const jumpToSearch = (direction: -1 | 1) => {
+    const matches = searchMatchesRef.current;
+    if (!matches.length) return;
+    const current = activeSearchIndexRef.current;
+    const nextIndex = current < 0
+      ? direction > 0 ? 0 : matches.length - 1
+      : (current + direction + matches.length) % matches.length;
+    activeSearchIndexRef.current = nextIndex;
+    setActiveSearchIndex(nextIndex);
+    if (searchRootRef.current) {
+      applyFinalSearchActiveHighlight(searchRootRef.current, matches, nextIndex);
+    }
+    scrollToFinalSearchMatch(matches[nextIndex]);
+  };
+  const locateCurrentSearch = () => {
+    const matches = searchMatchesRef.current;
+    if (!matches.length) return;
+    if (activeSearchIndexRef.current < 0) {
+      jumpToSearch(1);
+      return;
+    }
+    scrollToFinalSearchMatch(matches[activeSearchIndexRef.current]);
+  };
+  const clearSearch = () => {
+    invalidateSearch();
+    if (searchDebounceRef.current != null) {
+      window.clearTimeout(searchDebounceRef.current);
+      searchDebounceRef.current = null;
+    }
+    setSearchQuery("");
+    setSearchNeedle("");
+    setSearchRevision((revision) => revision + 1);
+  };
+  const searchPosition = activeSearchIndex >= 0 ? activeSearchIndex + 1 : 0;
+  const searchCountLabel = `${searchPosition}/${searchMatchCount}${searchLimitReached ? "+" : ""}`;
 
   return (
     <div className="space-y-2">
-      <div className="sticky top-0 z-10 -mx-3 -mt-3 flex items-center gap-1 border-b border-border bg-panel2/95 px-3 py-2 backdrop-blur">
+      <div className="sticky top-0 z-10 -mx-3 -mt-3 flex flex-wrap items-center gap-1 border-b border-border bg-panel2/95 px-3 py-2 backdrop-blur">
         <ToggleButton
           active={mode === "pretty"}
           disabled={!turns.length}
-          onClick={() => setMode("pretty")}
+          onClick={() => changeMode("pretty")}
           title={
             turns.length
               ? `Rendered (${turns.length} turn${turns.length > 1 ? "s" : ""})`
@@ -793,33 +947,311 @@ function FinalChatView({
         >
           Chat
         </ToggleButton>
-        <ToggleButton active={mode === "raw"} onClick={() => setMode("raw")}>
+        <ToggleButton active={mode === "raw"} onClick={() => changeMode("raw")}>
           Raw
         </ToggleButton>
-      </div>
-      {mode === "pretty" && turns.length ? (
-        <ChatView turns={turns} />
-      ) : (
-        <div className="space-y-3">
-          <div>
-            <Label>Request body</Label>
-            <CodeBlock text={requestRaw} />
-          </div>
-          <div>
-            <Label>
-              Final response body
-              {responseTruncated && (
-                <span className="ml-2 text-warn text-[10px] uppercase tracking-wider">
-                  truncated
-                </span>
-              )}
-            </Label>
-            <CodeBlock text={responseRaw} />
-          </div>
+        <div className="final-search-controls">
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(e) => updateSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                jumpToSearch(e.shiftKey ? -1 : 1);
+              } else if (e.key === "Escape" && searchQuery) {
+                e.preventDefault();
+                e.stopPropagation();
+                clearSearch();
+              }
+            }}
+            className="final-search-input"
+            aria-label="Search Final content"
+            placeholder="Search Final"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              className="final-search-button"
+              onClick={clearSearch}
+              aria-label="Clear Final search"
+              title="Clear search"
+            >
+              ×
+            </button>
+          )}
+          <button
+            type="button"
+            className="final-search-count"
+            onClick={locateCurrentSearch}
+            disabled={!searchMatchCount}
+            aria-label={`Locate current search match (${searchCountLabel})`}
+            title={searchLimitReached ? "Showing the first 5,000 matches" : "Locate current match"}
+          >
+            {searchCountLabel}
+          </button>
+          <button
+            type="button"
+            className="final-search-button"
+            onClick={() => jumpToSearch(-1)}
+            disabled={!searchMatchCount}
+            aria-label="Previous search match"
+            title="Previous match (Shift+Enter)"
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            className="final-search-button"
+            onClick={() => jumpToSearch(1)}
+            disabled={!searchMatchCount}
+            aria-label="Next search match"
+            title="Next match (Enter)"
+          >
+            ↓
+          </button>
         </div>
-      )}
+        {mode === "pretty" && userTurnIndexes.length > 0 && (
+          <div className="ml-auto flex items-center gap-1">
+            <button
+              type="button"
+              className="chat-user-nav-button"
+              onClick={() => jumpToUser(selectedUserPosition - 1)}
+              aria-label="Previous user question"
+              title="Previous user question"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              className="chat-user-nav-current"
+              onClick={() => jumpToUser(selectedUserPosition)}
+              aria-label={`Jump to user question ${selectedUserPosition + 1} of ${userTurnIndexes.length}`}
+              title={`Jump to user question ${selectedUserPosition + 1} of ${userTurnIndexes.length} (turn #${selectedUserTurnIndex + 1})`}
+            >
+              User {selectedUserPosition + 1}/{userTurnIndexes.length}
+            </button>
+            <button
+              type="button"
+              className="chat-user-nav-button"
+              onClick={() => jumpToUser(selectedUserPosition + 1)}
+              aria-label="Next user question"
+              title="Next user question"
+            >
+              ↓
+            </button>
+          </div>
+        )}
+      </div>
+      <div ref={searchRootRef}>
+        {mode === "pretty" && turns.length ? (
+          <ChatView
+            turns={turns}
+            rootRef={chatRef}
+            locatedTurnIndex={selectedUserTurnIndex}
+          />
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <Label>Request body</Label>
+              <CodeBlock text={requestRaw} />
+            </div>
+            <div>
+              <Label>
+                Final response body
+                {responseTruncated && (
+                  <span className="ml-2 text-warn text-[10px] uppercase tracking-wider">
+                    truncated
+                  </span>
+                )}
+              </Label>
+              <CodeBlock text={responseRaw} />
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
+}
+
+const FINAL_SEARCH_MATCH_HIGHLIGHT = "final-search-match";
+const FINAL_SEARCH_ACTIVE_HIGHLIGHT = "final-search-active";
+const MAX_FINAL_SEARCH_MATCHES = 5000;
+
+interface FinalSearchMatch {
+  range: Range;
+  block: HTMLElement;
+}
+
+interface FinalSearchResult {
+  matches: FinalSearchMatch[];
+  limitReached: boolean;
+}
+
+interface SearchTextSegment {
+  node: Text;
+  start: number;
+  end: number;
+}
+
+function collectFinalSearchMatches(
+  root: HTMLElement,
+  rawQuery: string,
+  limit: number,
+): FinalSearchResult {
+  const query = rawQuery.trim();
+  if (!query) return { matches: [], limitReached: false };
+  const expression = new RegExp(escapeRegExp(query), "giu");
+  const matches: FinalSearchMatch[] = [];
+  let limitReached = false;
+
+  for (const block of root.querySelectorAll<HTMLElement>("[data-final-search-block]")) {
+    const segments = finalSearchTextSegments(block);
+    if (!segments.length) continue;
+    const text = segments.map((segment) => segment.node.data).join("");
+    expression.lastIndex = 0;
+    for (const match of text.matchAll(expression)) {
+      const start = match.index ?? -1;
+      if (start < 0) continue;
+      const range = finalSearchRange(segments, start, start + match[0].length);
+      if (!range) continue;
+      if (matches.length >= limit) {
+        limitReached = true;
+        return { matches, limitReached };
+      }
+      matches.push({ range, block });
+    }
+  }
+
+  return { matches, limitReached };
+}
+
+function finalSearchTextSegments(block: HTMLElement): SearchTextSegment[] {
+  const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = node.parentElement;
+      if (!parent || parent.closest("[data-final-search-ignore], script, style")) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      return node.nodeValue ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    },
+  });
+  const segments: SearchTextSegment[] = [];
+  let offset = 0;
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const textNode = node as Text;
+    const length = textNode.data.length;
+    segments.push({ node: textNode, start: offset, end: offset + length });
+    offset += length;
+  }
+  return segments;
+}
+
+function finalSearchRange(
+  segments: SearchTextSegment[],
+  start: number,
+  end: number,
+): Range | null {
+  const startSegment = finalSearchSegmentAt(segments, start, false);
+  const endSegment = finalSearchSegmentAt(segments, end, true);
+  if (!startSegment || !endSegment) return null;
+  const range = document.createRange();
+  range.setStart(startSegment.node, start - startSegment.start);
+  range.setEnd(endSegment.node, end - endSegment.start);
+  return range;
+}
+
+function finalSearchSegmentAt(
+  segments: SearchTextSegment[],
+  offset: number,
+  endBoundary: boolean,
+): SearchTextSegment | null {
+  let low = 0;
+  let high = segments.length - 1;
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const segment = segments[mid];
+    if (endBoundary ? offset <= segment.start : offset < segment.start) {
+      high = mid - 1;
+    } else if (endBoundary ? offset > segment.end : offset >= segment.end) {
+      low = mid + 1;
+    } else {
+      return segment;
+    }
+  }
+  return null;
+}
+
+function mutationAffectsFinalSearch(mutation: MutationRecord): boolean {
+  const target = mutation.target.nodeType === Node.TEXT_NODE
+    ? mutation.target.parentElement
+    : mutation.target as Element;
+  return !target?.closest("[data-final-search-ignore]");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function applyFinalSearchHighlights(
+  root: HTMLElement,
+  matches: FinalSearchMatch[],
+  activeIndex: number,
+) {
+  clearFinalSearchHighlights(root);
+  if (typeof CSS !== "undefined" && CSS.highlights && typeof Highlight !== "undefined") {
+    if (matches.length > 0) {
+      const allMatches = new Highlight();
+      for (const match of matches) allMatches.add(match.range);
+      CSS.highlights.set(FINAL_SEARCH_MATCH_HIGHLIGHT, allMatches);
+    }
+  }
+  applyFinalSearchActiveHighlight(root, matches, activeIndex);
+}
+
+function applyFinalSearchActiveHighlight(
+  root: HTMLElement,
+  matches: FinalSearchMatch[],
+  activeIndex: number,
+) {
+  if (typeof CSS !== "undefined" && CSS.highlights) {
+    CSS.highlights.delete(FINAL_SEARCH_ACTIVE_HIGHLIGHT);
+  }
+  root.querySelectorAll(".final-search-current-block").forEach((element) => {
+    element.classList.remove("final-search-current-block");
+  });
+  const active = matches[activeIndex];
+  if (active && typeof CSS !== "undefined" && CSS.highlights && typeof Highlight !== "undefined") {
+    CSS.highlights.set(FINAL_SEARCH_ACTIVE_HIGHLIGHT, new Highlight(active.range));
+  }
+  matches[activeIndex]?.block.classList.add("final-search-current-block");
+}
+
+function clearFinalSearchHighlights(root?: HTMLElement) {
+  if (typeof CSS !== "undefined" && CSS.highlights) {
+    CSS.highlights.delete(FINAL_SEARCH_MATCH_HIGHLIGHT);
+    CSS.highlights.delete(FINAL_SEARCH_ACTIVE_HIGHLIGHT);
+  }
+  root?.querySelectorAll(".final-search-current-block").forEach((element) => {
+    element.classList.remove("final-search-current-block");
+  });
+}
+
+function scrollToFinalSearchMatch(match: FinalSearchMatch) {
+  const scroller = match.block.closest<HTMLElement>("[data-event-log-scroll]");
+  const rect = match.range.getBoundingClientRect();
+  if (scroller && (rect.width > 0 || rect.height > 0)) {
+    const scrollerRect = scroller.getBoundingClientRect();
+    const top =
+      scroller.scrollTop +
+      rect.top -
+      scrollerRect.top -
+      scroller.clientHeight / 2 +
+      rect.height / 2;
+    scroller.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+    return;
+  }
+  match.block.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
 }
 
 function finalChatTurns(requestRaw: string, responseRaw: string): Turn[] {
@@ -929,7 +1361,15 @@ function ToggleButton({
   );
 }
 
-function ChatView({ turns }: { turns: Turn[] }) {
+const ChatView = memo(function ChatView({
+  turns,
+  rootRef,
+  locatedTurnIndex,
+}: {
+  turns: Turn[];
+  rootRef?: React.Ref<HTMLDivElement>;
+  locatedTurnIndex?: number;
+}) {
   const [expandedTools, setExpandedTools] = useState<Set<number>>(() => new Set());
   const [expandedRaw, setExpandedRaw] = useState<Set<number>>(() => new Set());
   const [copiedTurn, setCopiedTurn] = useState<number | null>(null);
@@ -962,9 +1402,10 @@ function ChatView({ turns }: { turns: Turn[] }) {
   }, [copiedTurn]);
 
   return (
-    <div className="bg-panel border border-border rounded p-3 chat-view">
+    <div ref={rootRef} className="bg-panel border border-border rounded p-3 chat-view">
       {turns.map((turn, index) => {
         const isTool = isToolTurn(turn);
+        const isUserQuestion = isUserQuestionTurn(turn);
         const collapsed = isTool && !expandedTools.has(index);
         const rawText = turnRawText(turn);
         const rawExpanded = rawText != null && expandedRaw.has(index);
@@ -974,13 +1415,19 @@ function ChatView({ turns }: { turns: Turn[] }) {
         return (
           <div
             key={index}
+            data-chat-turn-index={index}
             className={clsx(
               "chat-row",
               turn.role.toLowerCase() === "user" ? "chat-row-user" : "chat-row-left",
+              isUserQuestion && "chat-row-user-question",
+              index === locatedTurnIndex && "chat-row-located",
             )}
           >
-            <div className={clsx("chat-bubble", bubbleClass, collapsed && "chat-bubble-collapsed")}>
-              <div className="chat-meta">
+            <div
+              className={clsx("chat-bubble", bubbleClass, collapsed && "chat-bubble-collapsed")}
+              data-final-search-block
+            >
+              <div className="chat-meta" data-final-search-ignore>
                 <span className={clsx("role-badge", isTool ? "role-badge-tool" : roleBadgeClass(turn.role))}>
                   {turn.role}
                 </span>
@@ -1035,7 +1482,7 @@ function ChatView({ turns }: { turns: Turn[] }) {
       })}
     </div>
   );
-}
+});
 
 function MarkdownContent({ text, className }: { text: string; className: string }) {
   return (
@@ -1070,8 +1517,14 @@ function StructuredContentParts({
 
 function StructuredContentPart({ part, index }: { part: Record<string, unknown>; index: number }) {
   const type = stringRecordValue(part.type);
+  if (type === "agent_message_meta") {
+    return <AgentMessageMetaPart part={part} />;
+  }
   if (type === "text" || type === "input_text" || type === "output_text") {
     return <TextPart part={part} />;
+  }
+  if (type === "encrypted_content") {
+    return <EncryptedContentPart part={part} />;
   }
   if (type === "thinking" || type === "reasoning") {
     return type === "reasoning" ? <ReasoningPart part={part} /> : <ThinkingPart part={part} type={type} />;
@@ -1122,6 +1575,29 @@ function TextPart({ part }: { part: Record<string, unknown> }) {
           <span className="part-chip">{annotations.length} annotation{annotations.length === 1 ? "" : "s"}</span>
         </div>
       )}
+    </div>
+  );
+}
+
+function AgentMessageMetaPart({ part }: { part: Record<string, unknown> }) {
+  const author = stringRecordValue(part.author) || "agent";
+  const recipient = stringRecordValue(part.recipient);
+  return (
+    <div className="agent-message-meta">
+      <span className="part-type-badge">agent message</span>
+      <span className="agent-message-route">
+        {author}{recipient ? ` → ${recipient}` : ""}
+      </span>
+    </div>
+  );
+}
+
+function EncryptedContentPart({ part }: { part: Record<string, unknown> }) {
+  const length = stringRecordValue(part.encrypted_content ?? part.data).length;
+  return (
+    <div className="chat-hidden-part">
+      <span className="part-type-badge">encrypted_content</span>
+      <span>Encrypted content{length > 0 ? ` · ${formatNumber(length)} chars` : ""}</span>
     </div>
   );
 }
@@ -1208,7 +1684,7 @@ function ToolUsePart({ part, index, type }: { part: Record<string, unknown>; ind
 }
 
 function FunctionCallPart({ part, type }: { part: Record<string, unknown>; type: string }) {
-  const name = stringRecordValue(part.name) || "function";
+  const name = qualifiedPartName(part, "function");
   const id = stringRecordValue(part.call_id) || stringRecordValue(part.id);
   const input = type === "custom_tool_call" ? part.input : part.arguments;
   return (
@@ -1235,7 +1711,7 @@ function FunctionCallOutputPart({ part, type }: { part: Record<string, unknown>;
         </div>
         {id && <span className="tool-id">{id}</span>}
       </div>
-      <JsonValueBlock label="Output" value={part.output ?? part.content ?? null} />
+      <ToolResultContent value={part.output ?? part.content ?? null} />
     </div>
   );
 }
@@ -1428,6 +1904,16 @@ function visualContentParts(turn: Turn): Record<string, unknown>[] | null {
     : Array.isArray(output)
       ? output.flatMap(responsesOutputVisualParts)
       : [];
+  if (rawType === "agent_message") {
+    return [
+      {
+        type: "agent_message_meta",
+        author: raw?.author,
+        recipient: raw?.recipient,
+      },
+      ...parts,
+    ];
+  }
   if (parts.length === 0) return null;
   return parts.some((part) => !isPlainTextPart(part)) ? parts : null;
 }
@@ -1562,6 +2048,13 @@ function stringRecordValue(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+function qualifiedPartName(part: Record<string, unknown>, fallback: string): string {
+  const name = stringRecordValue(part.name) || fallback;
+  const namespace = stringRecordValue(part.namespace);
+  if (!namespace || !name || name.startsWith(namespace + ".")) return name;
+  return `${namespace}.${name}`;
+}
+
 function turnRawText(turn: Turn): string | null {
   if (!Object.prototype.hasOwnProperty.call(turn, "raw")) return null;
   return rawValueText(turn.raw);
@@ -1617,6 +2110,10 @@ function isToolTurn(turn: Turn): boolean {
   return hiddenThinking ? startsWithCollapsibleBlock(text.slice(hiddenThinking[0].length).trimStart()) : false;
 }
 
+function isUserQuestionTurn(turn: Turn): boolean {
+  return turn.role.toLowerCase() === "user" && !isToolTurn(turn);
+}
+
 function startsWithCollapsibleBlock(text: string): boolean {
   return startsWithToolBlock(text) || startsWithWebSearchCallBlock(text);
 }
@@ -1651,6 +2148,8 @@ function chatBubbleClass(role: string): string {
       return "chat-bubble-user";
     case "assistant":
       return "chat-bubble-assistant";
+    case "agent":
+      return "chat-bubble-agent";
     case "system":
     case "developer":
       return "chat-bubble-system";
@@ -1682,6 +2181,8 @@ function roleBadgeClass(role: string): string {
       return "role-badge-user";
     case "assistant":
       return "role-badge-assistant";
+    case "agent":
+      return "role-badge-agent";
     case "system":
     case "developer":
       return "role-badge-system";
