@@ -161,12 +161,52 @@ func usageEventLogHandler(deps UsageDeps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		entry, err := deps.LogReader.Read(path)
+		entry, err := deps.LogReader.ReadForDisplay(path, c.Request.URL.Path+"/asset")
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 		writeJSONWithLength(c, http.StatusOK, gin.H{"found": true, "entry": entry})
+	}
+}
+
+func usageEventLogAssetHandler(deps UsageDeps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.LogReader == nil || deps.LogReader.Dir == "" {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "CPA_LOG_DIR is not configured"})
+			return
+		}
+		requestID := c.Param("request_id")
+		path, err := deps.LogReader.FindLog(requestID)
+		if err != nil {
+			if errors.Is(err, cpa.ErrLogNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"found": false})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		offset, err := strconv.ParseInt(c.Query("offset"), 10, 64)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid asset offset"})
+			return
+		}
+		length, err := strconv.ParseInt(c.Query("length"), 10, 64)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid asset length"})
+			return
+		}
+		asset, mimeType, err := deps.LogReader.ReadInlineAsset(path, offset, length)
+		if err != nil {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.Header("Cache-Control", "private, max-age=300")
+		c.Header("Content-Disposition", "inline")
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Data(http.StatusOK, mimeType, asset)
 	}
 }
 

@@ -272,6 +272,8 @@ function toolResultContentToMarkdown(raw: unknown, imageLabel: string): string {
         if (isImagePartType(type)) {
           const md = imagePartToMarkdown(p, `${imageLabel} ${++imageCount}`);
           parts.push(md || `_${describeImagePart(p)}_`);
+        } else if (isFilePartType(type)) {
+          parts.push(filePartMarkdown(p, type));
         } else if (typeof p.text === "string") {
           parts.push(fenceText(p.text));
         } else {
@@ -362,7 +364,8 @@ function dataURLFromInlineData(raw: unknown): string | null {
 
 function dataToImageURL(mediaType: string, data: string): string | null {
   const trimmed = data.trim();
-  if (trimmed.startsWith("data:")) return trimmed;
+  if (isNetworkAssetURL(trimmed)) return trimmed;
+  if (trimmed.startsWith("data:")) return isSafeDataImageURL(trimmed) ? trimmed : null;
   const normalized = normalizeRasterMediaType(mediaType);
   if (!normalized) return null;
   const payload = trimmed.replace(/\s+/g, "");
@@ -391,7 +394,11 @@ function imageMimeTypeFromOutputFormat(raw?: string): string | null {
 
 function isDisplayableImageURL(url: string): boolean {
   const trimmed = url.trim();
-  return isSafeDataImageURL(trimmed) || /^https?:\/\//i.test(trimmed);
+  return isSafeDataImageURL(trimmed) || isNetworkAssetURL(trimmed);
+}
+
+function isNetworkAssetURL(url: string): boolean {
+  return /^https?:\/\//i.test(url) || (url.startsWith("/") && !url.startsWith("//"));
 }
 
 export function isSafeDataImageURL(url: string): boolean {
@@ -425,6 +432,54 @@ function describeImagePart(part: Record<string, unknown>): string {
     (part.source as Record<string, unknown> | undefined)?.media_type ?? part.media_type,
   );
   return mediaType ? `image ${mediaType}` : "image";
+}
+
+function isFilePartType(type: string): boolean {
+  return type === "input_file" || type === "input_audio" || type === "file" || type === "document";
+}
+
+function filePartMarkdown(item: Record<string, unknown>, type: string): string {
+  const source = objectValue(item.source);
+  const name = stringValue(
+    item.filename ?? item.name ?? item.title ?? item.file_id ?? item.fileId ?? item.file_url,
+  );
+  const mediaType = stringValue(
+    item.media_type ?? item.mime_type ?? source?.media_type ?? source?.mime_type,
+  );
+  const sourceType = stringValue(source?.type);
+  const url = stringValue(item.file_url ?? item.url ?? source?.url) || inlineAssetURL(item, source);
+  const inlineChars = inlineAssetChars(item, source);
+  const details = [
+    name ? `- name: ${name}` : "",
+    mediaType ? `- media type: ${mediaType}` : "",
+    sourceType ? `- source: ${sourceType}` : "",
+    inlineChars ? `- inline data: ${inlineChars.toLocaleString()} chars` : "",
+    url ? `- url: ${url}` : "",
+  ].filter(Boolean);
+  return [`**[${type}]**`, details.join("\n")].filter(Boolean).join("\n\n");
+}
+
+function inlineAssetURL(
+  item: Record<string, unknown>,
+  source: Record<string, unknown> | null,
+): string {
+  for (const value of [item.data, item.file_data, source?.data, source?.file_data]) {
+    const candidate = stringValue(value).trim();
+    if (isNetworkAssetURL(candidate)) return candidate;
+  }
+  return "";
+}
+
+function inlineAssetChars(
+  item: Record<string, unknown>,
+  source: Record<string, unknown> | null,
+): number {
+  for (const value of [item.data, item.file_data, source?.data, source?.file_data]) {
+    const candidate = stringValue(value);
+    if (!candidate || isNetworkAssetURL(candidate.trim())) continue;
+    return candidate.length;
+  }
+  return 0;
 }
 
 function escapeMarkdownAlt(value: string): string {
@@ -538,6 +593,12 @@ function typedItemToTurn(item: Record<string, unknown>, type: string): Turn {
 }
 
 function typedItemMarkdown(item: Record<string, unknown>, type: string): string {
+  if (isImagePartType(type)) {
+    return imagePartToMarkdown(item, type) || `_${describeImagePart(item)}_`;
+  }
+  if (isFilePartType(type)) {
+    return filePartMarkdown(item, type);
+  }
   const details = typedItemDetails(item);
   const json = JSON.stringify(item, null, 2);
   return [`**[${type}]**`, details, codeFence(json, "json")].filter(Boolean).join("\n\n");

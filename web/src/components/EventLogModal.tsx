@@ -1758,6 +1758,7 @@ function FilePart({ part, type }: { part: Record<string, unknown>; type: string 
     "file";
   const source = isRecord(part.source) ? part.source : null;
   const sourceType = stringRecordValue(source?.type);
+  const url = filePartURL(part);
   return (
     <div className="generic-part">
       <div className="part-header">
@@ -1774,6 +1775,11 @@ function FilePart({ part, type }: { part: Record<string, unknown>; type: string 
         {sourceType && <span className="part-chip">source: {sourceType}</span>}
         {Array.isArray(part.citations) && <span className="part-chip">{part.citations.length} citations</span>}
         {inlineDataLength(part) > 0 && <span className="part-chip">{formatNumber(inlineDataLength(part))} inline chars</span>}
+        {url && (
+          <a className="part-chip hover:text-ink" href={url} target="_blank" rel="noreferrer">
+            Open
+          </a>
+        )}
       </div>
       <JsonValueBlock label="Details" value={filePartSummary(part)} />
     </div>
@@ -2015,7 +2021,7 @@ function filePartSummary(part: Record<string, unknown>): Record<string, unknown>
   const dataKeys = ["file_data", "data"];
   for (const key of dataKeys) {
     const data = stringRecordValue(part[key]);
-    if (data) summary[key] = `${data.length.toLocaleString()} chars`;
+    if (data) summary[key] = isSafeAssetURL(data) ? data : `${data.length.toLocaleString()} chars`;
   }
   if (Array.isArray(part.citations)) summary.citations = `${part.citations.length} item${part.citations.length === 1 ? "" : "s"}`;
   return summary;
@@ -2025,7 +2031,7 @@ function summarizeInlinePayload(value: Record<string, unknown>): Record<string, 
   const out: Record<string, unknown> = {};
   for (const [key, raw] of Object.entries(value)) {
     if ((key === "data" || key === "file_data") && typeof raw === "string") {
-      out[key] = `${raw.length.toLocaleString()} chars`;
+      out[key] = isSafeAssetURL(raw) ? raw : `${raw.length.toLocaleString()} chars`;
     } else {
       out[key] = raw;
     }
@@ -2034,10 +2040,28 @@ function summarizeInlinePayload(value: Record<string, unknown>): Record<string, 
 }
 
 function inlineDataLength(part: Record<string, unknown>): number {
-  const own = stringRecordValue(part.file_data).length || stringRecordValue(part.data).length;
+  const own = inlineDataValueLength(part.file_data) || inlineDataValueLength(part.data);
   if (own) return own;
   const source = isRecord(part.source) ? part.source : null;
-  return source ? stringRecordValue(source.data).length || stringRecordValue(source.file_data).length : 0;
+  return source ? inlineDataValueLength(source.data) || inlineDataValueLength(source.file_data) : 0;
+}
+
+function inlineDataValueLength(value: unknown): number {
+  const text = stringRecordValue(value);
+  return text && !isSafeAssetURL(text) ? text.length : 0;
+}
+
+function filePartURL(part: Record<string, unknown>): string {
+  const source = isRecord(part.source) ? part.source : null;
+  for (const value of [part.file_url, part.url, source?.url, part.file_data, part.data, source?.file_data, source?.data]) {
+    const candidate = stringRecordValue(value).trim();
+    if (isSafeAssetURL(candidate)) return candidate;
+  }
+  return "";
+}
+
+function isSafeAssetURL(value: string): boolean {
+  return /^https?:\/\//i.test(value) || (value.startsWith("/") && !value.startsWith("//"));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
