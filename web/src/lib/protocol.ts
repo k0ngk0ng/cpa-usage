@@ -398,7 +398,13 @@ function isDisplayableImageURL(url: string): boolean {
 }
 
 function isNetworkAssetURL(url: string): boolean {
-  return /^https?:\/\//i.test(url) || (url.startsWith("/") && !url.startsWith("//"));
+  if (/^https?:\/\//i.test(url)) return true;
+  if (!url.startsWith("/") || url.startsWith("//")) return false;
+  try {
+    return new URL(url, "http://cpa.local").pathname.endsWith("/log/asset");
+  } catch {
+    return false;
+  }
 }
 
 export function isSafeDataImageURL(url: string): boolean {
@@ -454,7 +460,7 @@ function filePartMarkdown(item: Record<string, unknown>, type: string): string {
     mediaType ? `- media type: ${mediaType}` : "",
     sourceType ? `- source: ${sourceType}` : "",
     inlineChars ? `- inline data: ${inlineChars.toLocaleString()} chars` : "",
-    url ? `- url: ${url}` : "",
+    url ? "- asset: available on demand" : "",
   ].filter(Boolean);
   return [`**[${type}]**`, details.join("\n")].filter(Boolean).join("\n\n");
 }

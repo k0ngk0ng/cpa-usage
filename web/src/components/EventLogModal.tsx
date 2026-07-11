@@ -1614,9 +1614,54 @@ function ImagePart({ part, index }: { part: Record<string, unknown>; index: numb
         {(detail || fileID) && <span className="part-muted">{detail || fileID}</span>}
       </div>
       {url ? (
-        <img className="chat-image" src={url} alt={`image ${index + 1}`} loading="lazy" />
+        <InlineImageAsset url={url} alt={`image ${index + 1}`} />
       ) : (
         <JsonValueBlock label="Image" value={part} />
+      )}
+    </div>
+  );
+}
+
+function InlineImageAsset({ url, alt }: { url: string; alt: string }) {
+  const [visible, setVisible] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  useEffect(() => {
+    setVisible(false);
+    setLoadFailed(false);
+  }, [url]);
+
+  const toggleVisible = () => {
+    if (!visible) setLoadFailed(false);
+    setVisible((current) => !current);
+  };
+
+  return (
+    <div className="asset-view">
+      <div className="asset-actions">
+        <button
+          type="button"
+          className="asset-action"
+          onClick={toggleVisible}
+          aria-pressed={visible}
+        >
+          {visible ? "Hide" : "Show"}
+        </button>
+        <a className="asset-action" href={assetDownloadURL(url)} download>
+          Download
+        </a>
+      </div>
+      {visible && (
+        <>
+          <img
+            className={clsx("chat-image", loadFailed && "hidden")}
+            src={url}
+            alt={alt}
+            onLoad={() => setLoadFailed(false)}
+            onError={() => setLoadFailed(true)}
+          />
+          {loadFailed && <div className="asset-error">Unable to load this image.</div>}
+        </>
       )}
     </div>
   );
@@ -1759,6 +1804,14 @@ function FilePart({ part, type }: { part: Record<string, unknown>; type: string 
   const source = isRecord(part.source) ? part.source : null;
   const sourceType = stringRecordValue(source?.type);
   const url = filePartURL(part);
+  const mediaType = filePartMediaType(part, url);
+  const canPreview = mediaType === "application/pdf";
+  const [previewVisible, setPreviewVisible] = useState(false);
+
+  useEffect(() => {
+    setPreviewVisible(false);
+  }, [url]);
+
   return (
     <div className="generic-part">
       <div className="part-header">
@@ -1766,8 +1819,8 @@ function FilePart({ part, type }: { part: Record<string, unknown>; type: string 
           <span className="part-type-badge">{type}</span>
           <span className="tool-name">{title}</span>
         </div>
-        {stringRecordValue(part.media_type ?? part.mime_type) && (
-          <span className="part-muted">{stringRecordValue(part.media_type ?? part.mime_type)}</span>
+        {mediaType && (
+          <span className="part-muted">{mediaType}</span>
         )}
       </div>
       <div className="part-meta">
@@ -1775,12 +1828,30 @@ function FilePart({ part, type }: { part: Record<string, unknown>; type: string 
         {sourceType && <span className="part-chip">source: {sourceType}</span>}
         {Array.isArray(part.citations) && <span className="part-chip">{part.citations.length} citations</span>}
         {inlineDataLength(part) > 0 && <span className="part-chip">{formatNumber(inlineDataLength(part))} inline chars</span>}
-        {url && (
-          <a className="part-chip hover:text-ink" href={url} target="_blank" rel="noreferrer">
+      </div>
+      {url && (
+        <div className="asset-actions">
+          {canPreview && (
+            <button
+              type="button"
+              className="asset-action"
+              onClick={() => setPreviewVisible((current) => !current)}
+              aria-pressed={previewVisible}
+            >
+              {previewVisible ? "Hide" : "Preview"}
+            </button>
+          )}
+          <a className="asset-action" href={url} target="_blank" rel="noreferrer">
             Open
           </a>
-        )}
-      </div>
+          <a className="asset-action" href={assetDownloadURL(url)} download>
+            Download
+          </a>
+        </div>
+      )}
+      {previewVisible && url && (
+        <iframe className="chat-document-preview" src={url} title={`${title} preview`} loading="lazy" />
+      )}
       <JsonValueBlock label="Details" value={filePartSummary(part)} />
     </div>
   );
@@ -1802,7 +1873,7 @@ function ImageGenerationPart({ part }: { part: Record<string, unknown> }) {
           stringRecordValue(part[key]) ? <span key={key} className="part-chip">{key}: {stringRecordValue(part[key])}</span> : null,
         )}
       </div>
-      {url ? <img className="chat-image" src={url} alt="generated image" loading="lazy" /> : null}
+      {url ? <InlineImageAsset url={url} alt="generated image" /> : null}
       {stringRecordValue(part.revised_prompt) && (
         <div className="tool-json-wrap">
           <div className="tool-json-label">Revised prompt</div>
@@ -1935,6 +2006,8 @@ function responsesOutputVisualParts(item: unknown): Record<string, unknown>[] {
 
 function isStandaloneVisualPart(type: string): boolean {
   return (
+    isImageVisualPart(type) ||
+    isFileVisualPart(type) ||
     type === "function_call" ||
     type === "custom_tool_call" ||
     type === "function_call_output" ||
@@ -1952,6 +2025,10 @@ function isPlainTextPart(part: Record<string, unknown>): boolean {
 
 function isImageVisualPart(type: string): boolean {
   return type === "image" || type === "input_image" || type === "image_url";
+}
+
+function isFileVisualPart(type: string): boolean {
+  return type === "input_file" || type === "input_audio" || type === "file" || type === "document";
 }
 
 function askUserQuestions(input: unknown): VisualQuestion[] | null {
@@ -2021,7 +2098,7 @@ function filePartSummary(part: Record<string, unknown>): Record<string, unknown>
   const dataKeys = ["file_data", "data"];
   for (const key of dataKeys) {
     const data = stringRecordValue(part[key]);
-    if (data) summary[key] = isSafeAssetURL(data) ? data : `${data.length.toLocaleString()} chars`;
+    if (data) summary[key] = isSafeAssetURL(data) ? "available on demand" : `${data.length.toLocaleString()} chars`;
   }
   if (Array.isArray(part.citations)) summary.citations = `${part.citations.length} item${part.citations.length === 1 ? "" : "s"}`;
   return summary;
@@ -2031,7 +2108,7 @@ function summarizeInlinePayload(value: Record<string, unknown>): Record<string, 
   const out: Record<string, unknown> = {};
   for (const [key, raw] of Object.entries(value)) {
     if ((key === "data" || key === "file_data") && typeof raw === "string") {
-      out[key] = isSafeAssetURL(raw) ? raw : `${raw.length.toLocaleString()} chars`;
+      out[key] = isSafeAssetURL(raw) ? "available on demand" : `${raw.length.toLocaleString()} chars`;
     } else {
       out[key] = raw;
     }
@@ -2060,8 +2137,41 @@ function filePartURL(part: Record<string, unknown>): string {
   return "";
 }
 
+function filePartMediaType(part: Record<string, unknown>, url: string): string {
+  const source = isRecord(part.source) ? part.source : null;
+  const direct = stringRecordValue(
+    part.media_type ?? part.mime_type ?? part.mimeType ?? source?.media_type ?? source?.mime_type ?? source?.mimeType,
+  ).trim();
+  if (direct) return direct.toLowerCase();
+  if (!url) return "";
+  try {
+    return new URL(url, "http://cpa.local").searchParams.get("mime")?.toLowerCase() || "";
+  } catch {
+    return "";
+  }
+}
+
+function assetDownloadURL(url: string): string {
+  if (!url || url.startsWith("data:")) return url;
+  try {
+    const parsed = new URL(url, "http://cpa.local");
+    if (!parsed.pathname.endsWith("/log/asset")) return url;
+    parsed.searchParams.set("download", "1");
+    if (/^https?:\/\//i.test(url)) return parsed.toString();
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return url;
+  }
+}
+
 function isSafeAssetURL(value: string): boolean {
-  return /^https?:\/\//i.test(value) || (value.startsWith("/") && !value.startsWith("//"));
+  if (/^https?:\/\//i.test(value)) return true;
+  if (!value.startsWith("/") || value.startsWith("//")) return false;
+  try {
+    return new URL(value, "http://cpa.local").pathname.endsWith("/log/asset");
+  } catch {
+    return false;
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

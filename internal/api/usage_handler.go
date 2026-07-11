@@ -204,10 +204,30 @@ func usageEventLogAssetHandler(deps UsageDeps) gin.HandlerFunc {
 		}
 
 		c.Header("Cache-Control", "private, max-age=300")
-		c.Header("Content-Disposition", "inline")
+		c.Header("Content-Disposition", logAssetContentDisposition(mimeType, c.Query("download") == "1"))
 		c.Header("X-Content-Type-Options", "nosniff")
 		c.Data(http.StatusOK, mimeType, asset)
 	}
+}
+
+func logAssetContentDisposition(mimeType string, download bool) string {
+	if !download {
+		return "inline"
+	}
+	extension := "bin"
+	switch mimeType {
+	case "image/png":
+		extension = "png"
+	case "image/jpeg":
+		extension = "jpg"
+	case "image/gif":
+		extension = "gif"
+	case "image/webp":
+		extension = "webp"
+	case "application/pdf":
+		extension = "pdf"
+	}
+	return `attachment; filename="log-asset.` + extension + `"`
 }
 
 func writeJSONWithLength(c *gin.Context, status int, value any) {
