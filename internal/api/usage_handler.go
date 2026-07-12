@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"path/filepath"
 	"strconv"
 	"time"
 
@@ -19,9 +18,10 @@ import (
 
 // UsageDeps wires the usage handlers to the service layer.
 type UsageDeps struct {
-	Service   *usage.Service
-	Store     storage.Store
-	LogReader *cpa.LogReader
+	Service       *usage.Service
+	Store         storage.Store
+	LogReader     *cpa.LogReader
+	LogDownloader cpa.RequestLogDownloader
 }
 
 // maxImportBodyBytes caps the size of an uploaded export snapshot. The legacy
@@ -141,52 +141,38 @@ func usageCredentialsHandler(deps UsageDeps) gin.HandlerFunc {
 	}
 }
 
-// usageEventLogHandler reads the CPA per-request log file matching
-// :request_id and returns structured sections (REQUEST INFO, HEADERS,
-// REQUEST BODY, each API RESPONSE attempt with its status, and the final
-// RESPONSE returned to the caller).
+// usageEventLogHandler resolves the CPA per-request log locally or through the
+// CPA management API and returns its structured sections.
 func usageEventLogHandler(deps UsageDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if deps.LogReader == nil || deps.LogReader.Dir == "" {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "CPA_LOG_DIR is not configured"})
+		if !eventLogSourceConfigured(deps) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "request log source is not configured"})
 			return
 		}
 		requestID := c.Param("request_id")
-		path, err := deps.LogReader.FindLog(requestID)
+		logFile, err := resolveEventLog(c.Request.Context(), deps, requestID)
 		if err != nil {
-			if errors.Is(err, cpa.ErrLogNotFound) {
-				c.JSON(http.StatusNotFound, gin.H{"found": false})
-				return
-			}
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			writeEventLogResolveError(c, err)
 			return
 		}
-		entry, err := deps.LogReader.ReadForDisplay(path, c.Request.URL.Path+"/asset")
+		defer logFile.Close()
+		entry, err := eventLogReader(deps).ReadForDisplay(logFile.path, c.Request.URL.Path+"/asset")
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		logFile.ApplyMetadata(entry)
 		writeJSONWithLength(c, http.StatusOK, gin.H{"found": true, "entry": entry})
 	}
 }
 
 func usageEventLogAssetHandler(deps UsageDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if deps.LogReader == nil || deps.LogReader.Dir == "" {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "CPA_LOG_DIR is not configured"})
+		if !eventLogSourceConfigured(deps) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "request log source is not configured"})
 			return
 		}
 		requestID := c.Param("request_id")
-		path, err := deps.LogReader.FindLog(requestID)
-		if err != nil {
-			if errors.Is(err, cpa.ErrLogNotFound) {
-				c.JSON(http.StatusNotFound, gin.H{"found": false})
-				return
-			}
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
 		offset, err := strconv.ParseInt(c.Query("offset"), 10, 64)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid asset offset"})
@@ -197,8 +183,12 @@ func usageEventLogAssetHandler(deps UsageDeps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid asset length"})
 			return
 		}
-		asset, mimeType, err := deps.LogReader.ReadInlineAsset(path, offset, length)
+		asset, mimeType, err := readEventLogAsset(c.Request.Context(), deps, requestID, offset, length)
 		if err != nil {
+			if errors.Is(err, cpa.ErrLogNotFound) || errors.Is(err, cpa.ErrInvalidRequestID) || errors.Is(err, errEventLogAssetFetch) {
+				writeEventLogResolveError(c, err)
+				return
+			}
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
 			return
 		}
@@ -238,6 +228,19 @@ func writeJSONWithLength(c *gin.Context, status int, value any) {
 	}
 	c.Header("Content-Length", strconv.Itoa(len(payload)))
 	c.Data(status, "application/json; charset=utf-8", payload)
+}
+
+func writeEventLogResolveError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, cpa.ErrLogNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"found": false})
+	case errors.Is(err, cpa.ErrInvalidRequestID):
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	case errors.Is(err, errEventLogSourceUnavailable):
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+	default:
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+	}
 }
 
 // usageImportHandler accepts a JSON snapshot exported from the legacy CPA
@@ -302,27 +305,23 @@ func usageBackfillHandler(deps UsageDeps) gin.HandlerFunc {
 	}
 }
 
-// usageEventLogRawHandler streams the raw CPA log file (unredacted by us; CPA
-// itself already shortens credential-bearing headers) so users can download
-// and inspect the original. Served as text/plain with a download disposition.
+// usageEventLogRawHandler streams the raw CPA log (unredacted by us; CPA itself
+// already shortens credential-bearing headers) so users can inspect it.
 func usageEventLogRawHandler(deps UsageDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if deps.LogReader == nil || deps.LogReader.Dir == "" {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "CPA_LOG_DIR is not configured"})
+		if !eventLogSourceConfigured(deps) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "request log source is not configured"})
 			return
 		}
 		requestID := c.Param("request_id")
-		path, err := deps.LogReader.FindLog(requestID)
+		logFile, err := resolveEventLog(c.Request.Context(), deps, requestID)
 		if err != nil {
-			if errors.Is(err, cpa.ErrLogNotFound) {
-				c.JSON(http.StatusNotFound, gin.H{"found": false})
-				return
-			}
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			writeEventLogResolveError(c, err)
 			return
 		}
+		defer logFile.Close()
 		c.Header("Content-Type", "text/plain; charset=utf-8")
-		c.Header("Content-Disposition", `attachment; filename="`+filepath.Base(path)+`"`)
-		c.File(path)
+		c.Header("Content-Disposition", `attachment; filename="`+logFile.fileName+`"`)
+		c.File(logFile.path)
 	}
 }

@@ -5,7 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
+	"mime"
 	"net/http"
+	"net/url"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +32,25 @@ type VersionInfo struct {
 	Version   string
 	Commit    string
 	BuildDate string
+}
+
+// RequestLogMeta describes a request log downloaded from CPA's management
+// endpoint. Size is the number of bytes copied into the caller's writer.
+type RequestLogMeta struct {
+	FileName string
+	Size     int64
+}
+
+// RequestLogDownloader is implemented by Client and kept as an interface so
+// API handlers can be tested without a live CPA process.
+type RequestLogDownloader interface {
+	DownloadRequestLog(ctx context.Context, requestID string, dst io.Writer) (RequestLogMeta, error)
+}
+
+// RequestLogRangeDownloader is the optional ranged-download capability used
+// for lazy inline assets, avoiding a full log transfer for every image or file.
+type RequestLogRangeDownloader interface {
+	DownloadRequestLogRange(ctx context.Context, requestID string, offset, length int64, dst io.Writer) (RequestLogMeta, error)
 }
 
 // NewClient builds a Client for the given CPA base URL and management key.
@@ -128,6 +151,90 @@ func (c *Client) FetchOpenAICompatibility(ctx context.Context) ([]OpenAICompatib
 		return nil, err
 	}
 	return resp["openai-compatibility"], nil
+}
+
+// DownloadRequestLog fetches the raw per-request log through CPA's management
+// API. This is the fallback for deployments where cpa-usage does not share the
+// CPA log directory.
+func (c *Client) DownloadRequestLog(ctx context.Context, requestID string, dst io.Writer) (RequestLogMeta, error) {
+	return c.downloadRequestLog(ctx, requestID, 0, 0, dst)
+}
+
+// DownloadRequestLogRange fetches exactly one byte range from a CPA request
+// log. It also tolerates older servers that ignore Range and return status 200.
+func (c *Client) DownloadRequestLogRange(ctx context.Context, requestID string, offset, length int64, dst io.Writer) (RequestLogMeta, error) {
+	if offset < 0 || length <= 0 || length > math.MaxInt64-offset {
+		return RequestLogMeta{}, fmt.Errorf("invalid request log range")
+	}
+	return c.downloadRequestLog(ctx, requestID, offset, length, dst)
+}
+
+func (c *Client) downloadRequestLog(ctx context.Context, requestID string, offset, length int64, dst io.Writer) (RequestLogMeta, error) {
+	if c == nil || c.baseURL == "" {
+		return RequestLogMeta{}, fmt.Errorf("cpa client is not configured")
+	}
+	if c.managementKey == "" {
+		return RequestLogMeta{}, fmt.Errorf("cpa management key is required")
+	}
+	if dst == nil {
+		return RequestLogMeta{}, fmt.Errorf("request log destination is required")
+	}
+	if err := ValidateRequestID(requestID); err != nil {
+		return RequestLogMeta{}, err
+	}
+
+	requestPath := managementRequestLogEndpoint + url.PathEscape(requestID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+requestPath, nil)
+	if err != nil {
+		return RequestLogMeta{}, fmt.Errorf("build request %s: %w", requestPath, err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.managementKey)
+	if length > 0 {
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", offset, offset+length-1))
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return RequestLogMeta{}, fmt.Errorf("request %s: %w", requestPath, err)
+	}
+	defer resp.Body.Close()
+	c.recordVersion(resp.Header)
+
+	if resp.StatusCode == http.StatusNotFound {
+		return RequestLogMeta{}, ErrLogNotFound
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return RequestLogMeta{}, fmt.Errorf("%s returned status %d", requestPath, resp.StatusCode)
+	}
+
+	var written int64
+	if length <= 0 {
+		written, err = io.Copy(dst, resp.Body)
+	} else {
+		if resp.StatusCode == http.StatusOK && offset > 0 {
+			if _, err = io.CopyN(io.Discard, resp.Body, offset); err != nil {
+				return RequestLogMeta{}, fmt.Errorf("skip %s body to range start: %w", requestPath, err)
+			}
+		}
+		written, err = io.CopyN(dst, resp.Body, length)
+	}
+	if err != nil {
+		return RequestLogMeta{}, fmt.Errorf("read %s body: %w", requestPath, err)
+	}
+	return RequestLogMeta{
+		FileName: requestLogFileName(resp.Header, requestID),
+		Size:     written,
+	}, nil
+}
+
+func requestLogFileName(header http.Header, requestID string) string {
+	if _, params, err := mime.ParseMediaType(header.Get("Content-Disposition")); err == nil {
+		name := strings.TrimSpace(params["filename"])
+		name = path.Base(strings.ReplaceAll(name, `\`, "/"))
+		if name != "" && name != "." && name != "/" {
+			return name
+		}
+	}
+	return "request-log-" + requestID + ".log"
 }
 
 func (c *Client) fetchProviderKeyConfig(ctx context.Context, path, envelopeKey string) ([]ProviderKeyConfig, error) {

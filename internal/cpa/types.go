@@ -15,6 +15,7 @@ const (
 	managementCodexKeysEndpoint    = "/v0/management/codex-api-key"
 	managementVertexKeysEndpoint   = "/v0/management/vertex-api-key"
 	managementOpenAICompatEndpoint = "/v0/management/openai-compatibility"
+	managementRequestLogEndpoint   = "/v0/management/request-log-by-id/"
 	modelsEndpoint                 = "/v1/models"
 
 	// Redis queue (RESP TCP) constants — multiplexed on CPA's HTTP port + 1 by default (8317).

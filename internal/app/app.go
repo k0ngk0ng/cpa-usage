@@ -107,8 +107,9 @@ func New(cfg *config.Config, build BuildInfo) (*App, error) {
 			Tokens:     tokens,
 		},
 		Usage: api.UsageDeps{
-			Service: usageSvc,
-			Store:   store,
+			Service:       usageSvc,
+			Store:         store,
+			LogDownloader: cpaClient,
 			LogReader: &cpa.LogReader{
 				Dir:            cfg.CPALogDir,
 				MaxBodyBytes:   cfg.LogBodyMaxBytes,

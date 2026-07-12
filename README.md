@@ -8,6 +8,7 @@ CPA v6.10 removed the legacy `/v0/management/usage/{export,import}` HTTP endpoin
 
 - Drains CPA's Redis usage queue (LPOP loop) and persists records as deduplicated `usage_events` rows
 - Periodically refreshes auth-files and provider catalogs from CPA management API
+- Reads per-request logs from `CPA_LOG_DIR`, falling back to CPA's authenticated `request-log-by-id` management endpoint when the filesystem is not shared
 - Computes per-model cost from configurable price-per-1M-token settings
 - Serves an API + SPA at `/usage/*` (subpath configurable)
 - Optional JWT cookie-based password login
@@ -62,6 +63,7 @@ All configuration is via environment variables (also see `.env.example`):
 |---|---|---|
 | `CPA_BASE_URL` | — | Required |
 | `CPA_MANAGEMENT_KEY` | — | Required |
+| `CPA_LOG_DIR` | `/home/cliproxy/logs` | Preferred local request-log directory; missing files fall back to CPA's management API |
 | `APP_PORT` | `8318` | |
 | `APP_BASE_PATH` | `/usage` | Set to `""` for root mount |
 | `TZ` | `Asia/Shanghai` | Drives "today" boundary + 03:00 cleanup |

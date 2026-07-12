@@ -65,8 +65,8 @@ func (r *LogReader) ReadForDisplay(path, assetURL string) (*LogEntry, error) {
 // ReadInlineAsset decodes one Base64 payload referenced by a compacted log
 // body. Offsets are absolute within the original immutable CPA log file.
 func (r *LogReader) ReadInlineAsset(path string, offset, encodedLength int64) ([]byte, string, error) {
-	if offset < 0 || encodedLength <= 0 || encodedLength > maxInlineAssetEncodedBytes {
-		return nil, "", fmt.Errorf("invalid inline asset range")
+	if err := ValidateInlineAssetRange(offset, encodedLength); err != nil {
+		return nil, "", err
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -84,6 +84,23 @@ func (r *LogReader) ReadInlineAsset(path string, offset, encodedLength int64) ([
 	encoded := make([]byte, encodedLength)
 	if _, err := io.ReadFull(io.NewSectionReader(f, offset, encodedLength), encoded); err != nil {
 		return nil, "", err
+	}
+	return DecodeInlineAsset(encoded)
+}
+
+// ValidateInlineAssetRange applies the same range bounds to local and remote
+// lazy-asset reads.
+func ValidateInlineAssetRange(offset, encodedLength int64) error {
+	if offset < 0 || encodedLength <= 0 || encodedLength > maxInlineAssetEncodedBytes {
+		return fmt.Errorf("invalid inline asset range")
+	}
+	return nil
+}
+
+// DecodeInlineAsset decodes and identifies a supported image or PDF payload.
+func DecodeInlineAsset(encoded []byte) ([]byte, string, error) {
+	if int64(len(encoded)) > maxInlineAssetEncodedBytes {
+		return nil, "", fmt.Errorf("invalid inline asset range")
 	}
 	decoded, err := decodeInlineAssetBase64(encoded)
 	if err != nil {

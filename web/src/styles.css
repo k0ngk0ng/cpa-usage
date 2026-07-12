@@ -119,7 +119,8 @@ body {
   color: #e7eaf0; background: #2a3140;
 }
 .chat-user-nav-button,
-.chat-user-nav-current {
+.chat-user-nav-current,
+.chat-asset-nav-current {
   height: 24px; border: 1px solid #3b4454; border-radius: 4px;
   color: #c9d0dc; background: #171c26; font-size: 10px; line-height: 1;
 }
@@ -131,8 +132,14 @@ body {
   border-color: #315f9f; background: #10213a;
   font-family: "JetBrains Mono", Menlo, Consolas, monospace;
 }
+.chat-asset-nav-current {
+  min-width: 78px; padding: 0 0.45rem; color: #d0b4ff;
+  border-color: #674aa1; background: #211837;
+  font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+}
 .chat-user-nav-button:hover,
-.chat-user-nav-current:hover {
+.chat-user-nav-current:hover,
+.chat-asset-nav-current:hover {
   color: #e7eaf0; background: #2a3140;
 }
 .final-search-controls {
@@ -222,6 +229,9 @@ body {
 .image-part {
   border: 1px solid #3b4454; border-radius: 6px; background: #111722;
   padding: 0.65rem; box-shadow: inset 3px 0 0 #9ec5ff;
+}
+.chat-asset-located {
+  scroll-margin-top: 5rem; outline: 2px solid #d0b4ff; outline-offset: 2px;
 }
 .chat-image {
   display: block; max-width: 100%; max-height: 520px; object-fit: contain;

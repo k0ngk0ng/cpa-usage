@@ -784,6 +784,8 @@ function FinalChatView({
   );
   const [mode, setMode] = useState<"pretty" | "raw">(turns.length ? "pretty" : "raw");
   const [selectedUserPosition, setSelectedUserPosition] = useState(() => userTurnIndexes.length - 1);
+  const [selectedAssetPosition, setSelectedAssetPosition] = useState(-1);
+  const [assetCount, setAssetCount] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchNeedle, setSearchNeedle] = useState("");
   const [searchRevision, setSearchRevision] = useState(0);
@@ -794,6 +796,8 @@ function FinalChatView({
   const searchRootRef = useRef<HTMLDivElement>(null);
   const searchMatchesRef = useRef<FinalSearchMatch[]>([]);
   const activeSearchIndexRef = useRef(-1);
+  const assetElementsRef = useRef<HTMLElement[]>([]);
+  const selectedAssetPositionRef = useRef(-1);
   const searchDebounceRef = useRef<number | null>(null);
 
   const invalidateSearch = useCallback(() => {
@@ -815,6 +819,25 @@ function FinalChatView({
   useEffect(() => {
     setSelectedUserPosition(userTurnIndexes.length - 1);
   }, [userTurnIndexes]);
+
+  const rebuildAssetIndex = useCallback(() => {
+    const assets = collectChatAssets(chatRef.current);
+    assetElementsRef.current = assets;
+    let nextPosition = selectedAssetPositionRef.current;
+    if (!assets.length) nextPosition = -1;
+    else if (nextPosition < 0 || nextPosition >= assets.length) nextPosition = assets.length - 1;
+    selectedAssetPositionRef.current = nextPosition;
+    setSelectedAssetPosition(nextPosition);
+    setAssetCount(assets.length);
+    applyChatAssetLocation(assets, nextPosition);
+  }, []);
+
+  useEffect(() => {
+    selectedAssetPositionRef.current = -1;
+    setSelectedAssetPosition(-1);
+    const frame = window.requestAnimationFrame(rebuildAssetIndex);
+    return () => window.cancelAnimationFrame(frame);
+  }, [turns, rebuildAssetIndex]);
 
   const rebuildSearch = useCallback(() => {
     const root = searchRootRef.current;
@@ -854,6 +877,23 @@ function FinalChatView({
   }, [rebuildSearch]);
 
   useEffect(() => {
+    const root = searchRootRef.current;
+    if (!root) return;
+    let frame = window.requestAnimationFrame(rebuildAssetIndex);
+    const observer = new MutationObserver(() => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(rebuildAssetIndex);
+    });
+    observer.observe(root, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      window.cancelAnimationFrame(frame);
+      applyChatAssetLocation(assetElementsRef.current, -1);
+      assetElementsRef.current = [];
+    };
+  }, [rebuildAssetIndex]);
+
+  useEffect(() => {
     return () => {
       if (searchDebounceRef.current != null) {
         window.clearTimeout(searchDebounceRef.current);
@@ -870,6 +910,18 @@ function FinalChatView({
     chatRef.current
       ?.querySelector<HTMLElement>(`[data-chat-turn-index="${turnIndex}"]`)
       ?.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
+  };
+
+  const jumpToAsset = (position: number) => {
+    const assets = collectChatAssets(chatRef.current);
+    if (!assets.length) return;
+    const wrappedPosition = (position + assets.length) % assets.length;
+    assetElementsRef.current = assets;
+    selectedAssetPositionRef.current = wrappedPosition;
+    setSelectedAssetPosition(wrappedPosition);
+    setAssetCount(assets.length);
+    applyChatAssetLocation(assets, wrappedPosition);
+    assets[wrappedPosition].scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
   };
 
   const selectedUserTurnIndex = userTurnIndexes[selectedUserPosition];
@@ -931,6 +983,7 @@ function FinalChatView({
   };
   const searchPosition = activeSearchIndex >= 0 ? activeSearchIndex + 1 : 0;
   const searchCountLabel = `${searchPosition}/${searchMatchCount}${searchLimitReached ? "+" : ""}`;
+  const assetPosition = selectedAssetPosition >= 0 ? selectedAssetPosition + 1 : assetCount;
 
   return (
     <div className="space-y-2">
@@ -1011,35 +1064,70 @@ function FinalChatView({
             ↓
           </button>
         </div>
-        {mode === "pretty" && userTurnIndexes.length > 0 && (
-          <div className="ml-auto flex items-center gap-1">
-            <button
-              type="button"
-              className="chat-user-nav-button"
-              onClick={() => jumpToUser(selectedUserPosition - 1)}
-              aria-label="Previous user question"
-              title="Previous user question"
-            >
-              ↑
-            </button>
-            <button
-              type="button"
-              className="chat-user-nav-current"
-              onClick={() => jumpToUser(selectedUserPosition)}
-              aria-label={`Jump to user question ${selectedUserPosition + 1} of ${userTurnIndexes.length}`}
-              title={`Jump to user question ${selectedUserPosition + 1} of ${userTurnIndexes.length} (turn #${selectedUserTurnIndex + 1})`}
-            >
-              User {selectedUserPosition + 1}/{userTurnIndexes.length}
-            </button>
-            <button
-              type="button"
-              className="chat-user-nav-button"
-              onClick={() => jumpToUser(selectedUserPosition + 1)}
-              aria-label="Next user question"
-              title="Next user question"
-            >
-              ↓
-            </button>
+        {mode === "pretty" && (userTurnIndexes.length > 0 || assetCount > 0) && (
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            {userTurnIndexes.length > 0 && (
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  className="chat-user-nav-button"
+                  onClick={() => jumpToUser(selectedUserPosition - 1)}
+                  aria-label="Previous user question"
+                  title="Previous user question"
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  className="chat-user-nav-current"
+                  onClick={() => jumpToUser(selectedUserPosition)}
+                  aria-label={`Jump to user question ${selectedUserPosition + 1} of ${userTurnIndexes.length}`}
+                  title={`Jump to user question ${selectedUserPosition + 1} of ${userTurnIndexes.length} (turn #${selectedUserTurnIndex + 1})`}
+                >
+                  User {selectedUserPosition + 1}/{userTurnIndexes.length}
+                </button>
+                <button
+                  type="button"
+                  className="chat-user-nav-button"
+                  onClick={() => jumpToUser(selectedUserPosition + 1)}
+                  aria-label="Next user question"
+                  title="Next user question"
+                >
+                  ↓
+                </button>
+              </div>
+            )}
+            {assetCount > 0 && (
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  className="chat-user-nav-button"
+                  onClick={() => jumpToAsset(selectedAssetPosition - 1)}
+                  aria-label="Previous asset"
+                  title="Previous asset"
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  className="chat-asset-nav-current"
+                  onClick={() => jumpToAsset(selectedAssetPosition)}
+                  aria-label={`Jump to asset ${assetPosition} of ${assetCount}`}
+                  title={`Jump to asset ${assetPosition} of ${assetCount}`}
+                >
+                  Asset {assetPosition}/{assetCount}
+                </button>
+                <button
+                  type="button"
+                  className="chat-user-nav-button"
+                  onClick={() => jumpToAsset(selectedAssetPosition + 1)}
+                  aria-label="Next asset"
+                  title="Next asset"
+                >
+                  ↓
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1077,6 +1165,18 @@ function FinalChatView({
 const FINAL_SEARCH_MATCH_HIGHLIGHT = "final-search-match";
 const FINAL_SEARCH_ACTIVE_HIGHLIGHT = "final-search-active";
 const MAX_FINAL_SEARCH_MATCHES = 5000;
+const CHAT_ASSET_SELECTOR = "[data-chat-asset]";
+const CHAT_ASSET_LOCATED_CLASS = "chat-asset-located";
+
+function collectChatAssets(root: HTMLElement | null): HTMLElement[] {
+  return root ? Array.from(root.querySelectorAll<HTMLElement>(CHAT_ASSET_SELECTOR)) : [];
+}
+
+function applyChatAssetLocation(assets: HTMLElement[], activeIndex: number) {
+  assets.forEach((asset, index) => {
+    asset.classList.toggle(CHAT_ASSET_LOCATED_CLASS, index === activeIndex);
+  });
+}
 
 interface FinalSearchMatch {
   range: Range;
@@ -1370,7 +1470,13 @@ const ChatView = memo(function ChatView({
   rootRef?: React.Ref<HTMLDivElement>;
   locatedTurnIndex?: number;
 }) {
-  const [expandedTools, setExpandedTools] = useState<Set<number>>(() => new Set());
+  const [expandedTools, setExpandedTools] = useState<Set<number>>(
+    () => new Set(
+      turns.flatMap((turn, index) =>
+        isToolTurn(turn) && turnContainsVisualAsset(turn) ? [index] : [],
+      ),
+    ),
+  );
   const [expandedRaw, setExpandedRaw] = useState<Set<number>>(() => new Set());
   const [copiedTurn, setCopiedTurn] = useState<number | null>(null);
   const toggleTool = (index: number) => {
@@ -1608,7 +1714,10 @@ function ImagePart({ part, index }: { part: Record<string, unknown>; index: numb
   const detail = stringRecordValue(part.detail);
   const fileID = stringRecordValue(part.file_id) || stringRecordValue(part.fileId);
   return (
-    <div className="image-part">
+    <div
+      className="image-part"
+      data-chat-asset={url ? "image" : undefined}
+    >
       <div className="part-header">
         <span className="part-type-badge">{type}</span>
         {(detail || fileID) && <span className="part-muted">{detail || fileID}</span>}
@@ -1813,7 +1922,10 @@ function FilePart({ part, type }: { part: Record<string, unknown>; type: string 
   }, [url]);
 
   return (
-    <div className="generic-part">
+    <div
+      className="generic-part"
+      data-chat-asset={url ? "file" : undefined}
+    >
       <div className="part-header">
         <div className="tool-use-title">
           <span className="part-type-badge">{type}</span>
@@ -1860,7 +1972,10 @@ function FilePart({ part, type }: { part: Record<string, unknown>; type: string 
 function ImageGenerationPart({ part }: { part: Record<string, unknown> }) {
   const url = displayableGeneratedImageURLFromPart(part);
   return (
-    <div className="image-part">
+    <div
+      className="image-part"
+      data-chat-asset={url ? "image" : undefined}
+    >
       <div className="part-header">
         <div className="tool-use-title">
           <span className="part-type-badge">image_generation_call</span>
@@ -2242,6 +2357,23 @@ function isToolTurn(turn: Turn): boolean {
   if (startsWithCollapsibleBlock(text)) return true;
   const hiddenThinking = /^\*\*Thinking\*\*\s+_\((?:reasoning|thinking|redacted_thinking)\)_\s+(?:---\s+)?/s.exec(text);
   return hiddenThinking ? startsWithCollapsibleBlock(text.slice(hiddenThinking[0].length).trimStart()) : false;
+}
+
+function turnContainsVisualAsset(turn: Turn): boolean {
+  return containsVisualAsset(turn.raw) || !!turn.attachments?.length;
+}
+
+function containsVisualAsset(value: unknown, depth = 0): boolean {
+  if (depth > 16) return false;
+  if (Array.isArray(value)) {
+    return value.some((item) => containsVisualAsset(item, depth + 1));
+  }
+  if (!isRecord(value)) return false;
+  const type = stringRecordValue(value.type);
+  if (isImageVisualPart(type) || isFileVisualPart(type) || type === "image_generation_call") return true;
+  return [value.content, value.output, value.parts, value.result].some((item) =>
+    containsVisualAsset(item, depth + 1),
+  );
 }
 
 function isUserQuestionTurn(turn: Turn): boolean {

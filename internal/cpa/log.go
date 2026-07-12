@@ -3,7 +3,6 @@ package cpa
 import (
 	"bufio"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -55,12 +54,25 @@ type LogEntry struct {
 	ResponseTruncated bool              `json:"response_body_truncated"`
 }
 
-// ErrLogNotFound is returned when no log file matches the request id.
-var ErrLogNotFound = errors.New("log not found")
+var (
+	// ErrLogNotFound is returned when no log file matches the request id.
+	ErrLogNotFound = errors.New("log not found")
+	// ErrInvalidRequestID is returned for values unsafe in log paths.
+	ErrInvalidRequestID = errors.New("invalid request id")
+)
 
 // requestIDPattern restricts the request id to a path-safe alphabet so we can
 // safely interpolate it into a glob pattern.
 var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+
+// ValidateRequestID rejects values that cannot be part of a CPA request-log
+// filename or management endpoint path.
+func ValidateRequestID(requestID string) error {
+	if !requestIDPattern.MatchString(requestID) {
+		return ErrInvalidRequestID
+	}
+	return nil
+}
 
 // FindLog returns the most recent log file matching *<request_id>*.log.
 // Returns ErrLogNotFound if nothing matches.
@@ -68,8 +80,8 @@ func (r *LogReader) FindLog(requestID string) (string, error) {
 	if r == nil || strings.TrimSpace(r.Dir) == "" {
 		return "", ErrLogNotFound
 	}
-	if !requestIDPattern.MatchString(requestID) {
-		return "", fmt.Errorf("invalid request id")
+	if err := ValidateRequestID(requestID); err != nil {
+		return "", err
 	}
 	matches, err := filepath.Glob(filepath.Join(r.Dir, "*-"+requestID+".log"))
 	if err != nil {
