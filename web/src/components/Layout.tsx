@@ -61,8 +61,9 @@ export default function Layout({ children, authRequired, onLogout }: Props) {
   const drainHealthy =
     status &&
     !status.last_error &&
-    !isZeroTime(status.last_pop_at) &&
-    Date.now() - new Date(status.last_pop_at).getTime() < 5 * 60_000;
+    (status.redis_mode === "subscribe" ||
+      (!isZeroTime(status.last_pop_at) &&
+        Date.now() - new Date(status.last_pop_at).getTime() < 5 * 60_000));
 
   return (
     <div className="min-h-full flex flex-col">
@@ -179,7 +180,8 @@ function DrainBadge({ status, healthy }: { status: DrainStatus | null; healthy: 
         )}
       />
       <span>
-        last pop {formatRelative(status.last_pop_at)} · {status.total_inserted.toLocaleString()} ingested
+        {status.redis_mode || "queue"} · last receive {formatRelative(status.last_pop_at)} ·{" "}
+        {status.total_inserted.toLocaleString()} ingested
       </span>
     </div>
   );

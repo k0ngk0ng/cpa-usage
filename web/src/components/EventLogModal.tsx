@@ -502,6 +502,7 @@ function eventRecordMap(event: UsageEventRecord): Record<string, string> {
     event_key: displayValue(event.event_key),
     timestamp: displayValue(formatTimestamp(event.timestamp)),
     provider: displayValue(event.provider),
+    executor_type: displayValue(event.executor_type),
     model: displayValue(event.model),
     alias: displayValue(event.alias),
     api_group_key: displayValue(event.api_group_key),
@@ -526,6 +527,8 @@ function eventRecordMap(event: UsageEventRecord): Record<string, string> {
     fail_body: displayValue(event.fail_body),
     reasoning_effort: displayValue(event.reasoning_effort),
     service_tier: displayValue(event.service_tier),
+    request_service_tier: displayValue(event.request_service_tier),
+    response_service_tier: displayValue(event.response_service_tier),
     cost: formatCost(event.cost),
   };
 }

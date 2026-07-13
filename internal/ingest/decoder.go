@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -13,7 +14,7 @@ import (
 
 // Decode parses a single CPA JSON usage message into a storage.UsageEvent.
 // Returns an error if request_id is missing — CPA v6.10+ always sets it; messages
-// without one are dropped at the call site so we don't poison the dedup index.
+// without one cannot be correlated with request logs and are dropped.
 func Decode(message string) (storage.UsageEvent, error) {
 	if strings.TrimSpace(message) == "" {
 		return storage.UsageEvent{}, fmt.Errorf("empty message")
@@ -31,10 +32,12 @@ func Decode(message string) (storage.UsageEvent, error) {
 		ts = time.Now().UTC()
 	}
 	tokens := normalizeUsageTokens(rec)
+	requestServiceTier := firstNonEmptyString(rec.RequestServiceTier, rec.ServiceTier)
 	return storage.UsageEvent{
-		EventKey:            requestID,
+		EventKey:            usageEventKey(message),
 		Timestamp:           ts.UTC(),
 		Provider:            strings.TrimSpace(rec.Provider),
+		ExecutorType:        strings.TrimSpace(rec.ExecutorType),
 		Model:               strings.TrimSpace(rec.Model),
 		Alias:               strings.TrimSpace(rec.Alias),
 		APIGroupKey:         resolveAPIGroupKey(rec),
@@ -58,7 +61,9 @@ func Decode(message string) (storage.UsageEvent, error) {
 		FailBody:            strings.TrimSpace(rec.Fail.Body),
 		ResponseHeaders:     compactRawJSON(rec.ResponseHeaders),
 		ReasoningEffort:     strings.TrimSpace(rec.ReasoningEffort),
-		ServiceTier:         strings.TrimSpace(rec.ServiceTier),
+		ServiceTier:         requestServiceTier,
+		RequestServiceTier:  requestServiceTier,
+		ResponseServiceTier: strings.TrimSpace(rec.ResponseServiceTier),
 		InsertedAt:          time.Now().UTC(),
 	}, nil
 }
@@ -119,13 +124,26 @@ func normalizeUsageTokens(rec cpa.UsageRecord) cpa.UsageTokens {
 }
 
 func isClaudeStyleUsage(rec cpa.UsageRecord) bool {
-	for _, value := range []string{rec.Provider, rec.Model, rec.Endpoint} {
-		v := strings.ToLower(strings.TrimSpace(value))
-		if strings.Contains(v, "claude") || strings.Contains(v, "anthropic") {
-			return true
+	executorType := strings.ToLower(strings.TrimSpace(rec.ExecutorType))
+	if executorType != "" {
+		return executorType == "claudeexecutor"
+	}
+	provider := strings.ToLower(strings.TrimSpace(rec.Provider))
+	return provider == "claude" || provider == "anthropic"
+}
+
+func usageEventKey(message string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(message)))
+	return fmt.Sprintf("usage:%x", sum[:])
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
 		}
 	}
-	return false
+	return ""
 }
 
 func subtractFloor(value, delta int64) int64 {

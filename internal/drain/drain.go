@@ -1,5 +1,5 @@
-// Package drain runs the background loop that pops usage records from CPA's
-// redis queue, decodes them, and persists to storage. A single drain instance
+// Package drain consumes usage records from CPA's Redis-style subscription and
+// LPOP backlog, decodes them, and persists to storage. A single drain instance
 // also drives periodic metadata refreshes (auth-files / provider catalogs).
 //
 // Lifecycle: New(...) returns a Drain ready to Run; Run blocks until ctx is
@@ -45,6 +45,7 @@ type Status struct {
 	TotalDecodeErrors  int64
 	BatchesPopped      int64
 	RedisAddress       string
+	RedisMode          string
 }
 
 // Drain orchestrates the queue-pop / decode / insert / metadata-sync pipeline.
@@ -82,7 +83,7 @@ func New(queue *cpa.RedisQueue, store storage.Store, metadata MetadataSyncer, lo
 		logger:   logger,
 		cfg:      cfg,
 		syncReq:  make(chan chan error, 1),
-		status:   Status{RedisAddress: queue.Address()},
+		status:   Status{RedisAddress: queue.Address(), RedisMode: "starting"},
 	}
 }
 
@@ -112,43 +113,83 @@ func (d *Drain) SyncNow(ctx context.Context) error {
 	}
 }
 
-// Run drives the pop/decode/insert loop until ctx is cancelled.
-// One ingest tick at a time keeps inserts strictly ordered and removes the need
-// for the staging-table pattern used by cpa-usage-keeper.
+// Run prefers CPA's broadcast usage subscription and drains the pre-existing
+// LPOP backlog after the subscription is active. Older CPA builds that reject
+// SUBSCRIBE fall back to the legacy polling loop.
 func (d *Drain) Run(ctx context.Context) error {
 	d.logger.Info("drain started")
 	defer d.logger.Info("drain stopped")
 
-	if d.metadata != nil {
-		if err := d.runMetadataSync(ctx); err != nil {
-			d.logger.WithError(err).Warn("initial metadata sync failed")
-		}
-	}
-
 	metaTicker := time.NewTicker(d.cfg.MetadataInterval)
 	defer metaTicker.Stop()
+	initialMetadataSynced := false
 
 	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-		}
-
-		select {
-		case respCh := <-d.syncReq:
-			err := d.runMetadataSync(ctx)
-			respCh <- err
-			continue
-		default:
-		}
-
-		select {
-		case <-metaTicker.C:
-			if err := d.runMetadataSync(ctx); err != nil {
-				d.logger.WithError(err).Warn("metadata sync failed")
+		messages, subscriptionErrors, err := d.queue.SubscribeUsage(ctx)
+		if err != nil {
+			if errors.Is(err, cpa.ErrRedisSubscribeUnsupported) {
+				d.setRedisMode("poll")
+				d.clearError("subscribe")
+				d.logger.WithError(err).Info("redis usage subscription unavailable; using LPOP polling")
+				if !initialMetadataSynced {
+					d.runInitialMetadataSync(ctx)
+					initialMetadataSynced = true
+				}
+				return d.runPolling(ctx, metaTicker)
 			}
-		default:
+			d.recordError("subscribe", err)
+			d.logger.WithError(err).Warn("redis usage subscribe failed")
+			if sleepCtx(ctx, d.cfg.ErrorBackoff) {
+				return nil
+			}
+			continue
+		}
+
+		d.setRedisMode("subscribe")
+		d.clearError("subscribe")
+		if !initialMetadataSynced {
+			d.runInitialMetadataSync(ctx)
+			initialMetadataSynced = true
+		}
+		for {
+			if err := d.drainBacklog(ctx); err != nil {
+				d.recordError("pop", err)
+				d.logger.WithError(err).Warn("redis backlog pop failed; retrying while live messages are buffered")
+				if sleepCtx(ctx, d.cfg.ErrorBackoff) {
+					return nil
+				}
+				continue
+			}
+			break
+		}
+		if err := d.runSubscription(ctx, metaTicker, messages, subscriptionErrors); err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			d.recordError("subscribe", err)
+			d.logger.WithError(err).Warn("redis usage subscription ended")
+			if sleepCtx(ctx, d.cfg.ErrorBackoff) {
+				return nil
+			}
+			continue
+		}
+		return nil
+	}
+}
+
+func (d *Drain) runInitialMetadataSync(ctx context.Context) {
+	if d.metadata == nil {
+		return
+	}
+	if err := d.runMetadataSync(ctx); err != nil {
+		d.logger.WithError(err).Warn("initial metadata sync failed")
+	}
+}
+
+func (d *Drain) runPolling(ctx context.Context, metaTicker *time.Ticker) error {
+	for {
+		if d.handleMaintenance(ctx, metaTicker) {
+			return nil
 		}
 
 		messages, err := d.queue.PopUsage(ctx)
@@ -171,26 +212,134 @@ func (d *Drain) Run(ctx context.Context) error {
 			continue
 		}
 
-		events, dropped := ingest.DecodeBatch(messages)
-		if dropped > 0 {
-			d.mu.Lock()
-			d.status.TotalDecodeErrors += int64(dropped)
-			d.mu.Unlock()
-			d.logger.WithField("dropped", dropped).Warn("dropped malformed usage records")
+		if !d.persistMessages(ctx, messages) {
+			return nil
 		}
-		if len(events) == 0 {
-			continue
-		}
-		inserted, deduped, err := d.store.InsertUsageEvents(ctx, events)
-		if err != nil {
-			d.recordError("insert", err)
-			d.logger.WithError(err).Error("insert usage events failed")
-			if sleepCtx(ctx, d.cfg.ErrorBackoff) {
+	}
+}
+
+func (d *Drain) runSubscription(ctx context.Context, metaTicker *time.Ticker, messages <-chan string, subscriptionErrors <-chan error) error {
+	batchSize := d.queue.BatchSize()
+	if batchSize <= 0 {
+		batchSize = 1000
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case respCh := <-d.syncReq:
+			respCh <- d.runMetadataSync(ctx)
+		case <-metaTicker.C:
+			if err := d.runMetadataSync(ctx); err != nil {
+				d.logger.WithError(err).Warn("metadata sync failed")
+			}
+		case err, ok := <-subscriptionErrors:
+			if ok && err != nil {
+				return err
+			}
+			subscriptionErrors = nil
+		case message, ok := <-messages:
+			if !ok {
+				if err := pendingSubscriptionError(subscriptionErrors); err != nil {
+					return err
+				}
+				return errors.New("redis usage subscription closed")
+			}
+			batch := []string{message}
+		collectBatch:
+			for len(batch) < batchSize {
+				select {
+				case next, open := <-messages:
+					if !open {
+						messages = nil
+						break collectBatch
+					}
+					batch = append(batch, next)
+				default:
+					break collectBatch
+				}
+			}
+			d.recordPopSuccess(time.Now().UTC())
+			if !d.persistMessages(ctx, batch) {
 				return nil
 			}
-			continue
+			if messages == nil {
+				if err := pendingSubscriptionError(subscriptionErrors); err != nil {
+					return err
+				}
+				return errors.New("redis usage subscription closed")
+			}
 		}
-		d.recordInsertSuccess(time.Now().UTC(), inserted, deduped)
+	}
+}
+
+func (d *Drain) drainBacklog(ctx context.Context) error {
+	for {
+		messages, err := d.queue.PopUsage(ctx)
+		if err != nil {
+			return err
+		}
+		d.recordPopSuccess(time.Now().UTC())
+		if len(messages) == 0 {
+			return nil
+		}
+		if !d.persistMessages(ctx, messages) {
+			return ctx.Err()
+		}
+	}
+}
+
+func (d *Drain) persistMessages(ctx context.Context, messages []string) bool {
+	events, dropped := ingest.DecodeBatch(messages)
+	if dropped > 0 {
+		d.mu.Lock()
+		d.status.TotalDecodeErrors += int64(dropped)
+		d.mu.Unlock()
+		d.logger.WithField("dropped", dropped).Warn("dropped malformed usage records")
+	}
+	if len(events) == 0 {
+		return true
+	}
+	for {
+		inserted, deduped, err := d.store.InsertUsageEvents(ctx, events)
+		if err == nil {
+			d.recordInsertSuccess(time.Now().UTC(), inserted, deduped)
+			return true
+		}
+		d.recordError("insert", err)
+		d.logger.WithError(err).Error("insert usage events failed; retaining batch for retry")
+		if sleepCtx(ctx, d.cfg.ErrorBackoff) {
+			return false
+		}
+	}
+}
+
+func (d *Drain) handleMaintenance(ctx context.Context, metaTicker *time.Ticker) bool {
+	select {
+	case <-ctx.Done():
+		return true
+	case respCh := <-d.syncReq:
+		respCh <- d.runMetadataSync(ctx)
+		return false
+	case <-metaTicker.C:
+		if err := d.runMetadataSync(ctx); err != nil {
+			d.logger.WithError(err).Warn("metadata sync failed")
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+func pendingSubscriptionError(errorsCh <-chan error) error {
+	if errorsCh == nil {
+		return nil
+	}
+	select {
+	case err := <-errorsCh:
+		return err
+	default:
+		return nil
 	}
 }
 
@@ -215,6 +364,21 @@ func (d *Drain) recordError(source string, err error) {
 	d.status.LastErrorAt = time.Now().UTC()
 	d.status.LastError = err.Error()
 	d.status.lastErrorSource = source
+	d.mu.Unlock()
+}
+
+func (d *Drain) clearError(source string) {
+	d.mu.Lock()
+	if d.status.lastErrorSource == source {
+		d.status.LastError = ""
+		d.status.lastErrorSource = ""
+	}
+	d.mu.Unlock()
+}
+
+func (d *Drain) setRedisMode(mode string) {
+	d.mu.Lock()
+	d.status.RedisMode = mode
 	d.mu.Unlock()
 }
 

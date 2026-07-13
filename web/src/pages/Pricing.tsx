@@ -10,6 +10,7 @@ interface Draft {
   prompt_price_per_1m: string;
   completion_price_per_1m: string;
   cache_price_per_1m: string;
+  cache_write_price_per_1m: string;
 }
 
 const emptyDraft: Draft = {
@@ -17,6 +18,7 @@ const emptyDraft: Draft = {
   prompt_price_per_1m: "0",
   completion_price_per_1m: "0",
   cache_price_per_1m: "0",
+  cache_write_price_per_1m: "",
 };
 
 export default function PricingPage() {
@@ -55,11 +57,15 @@ export default function PricingPage() {
     }
     setSubmitting(true);
     try {
+      const cacheWritePrice = draft.cache_write_price_per_1m.trim();
       await api.upsertPricing({
         model: draft.model.trim(),
         prompt_price_per_1m: Number(draft.prompt_price_per_1m) || 0,
         completion_price_per_1m: Number(draft.completion_price_per_1m) || 0,
         cache_price_per_1m: Number(draft.cache_price_per_1m) || 0,
+        ...(cacheWritePrice
+          ? { cache_write_price_per_1m: Number(cacheWritePrice) || 0 }
+          : {}),
       });
       setDraft(emptyDraft);
       await reload();
@@ -87,6 +93,8 @@ export default function PricingPage() {
       prompt_price_per_1m: String(row.PromptPricePer1M),
       completion_price_per_1m: String(row.CompletionPricePer1M),
       cache_price_per_1m: String(row.CachePricePer1M),
+      cache_write_price_per_1m:
+        row.CacheWritePricePer1M == null ? "" : String(row.CacheWritePricePer1M),
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -94,7 +102,15 @@ export default function PricingPage() {
   const cols: Column<ModelPriceSetting>[] = [
     { header: "Model", cell: (r) => <span className="font-mono text-xs">{r.Model}</span> },
     { header: "INPUT /1M", align: "right", cell: (r) => `$${r.PromptPricePer1M}` },
-    { header: "CACHE /1M", align: "right", cell: (r) => `$${r.CachePricePer1M}` },
+    { header: "CACHE READ /1M", align: "right", cell: (r) => `$${r.CachePricePer1M}` },
+    {
+      header: "CACHE WRITE /1M",
+      align: "right",
+      cell: (r) =>
+        r.CacheWritePricePer1M == null
+          ? `$${r.PromptPricePer1M} (input)`
+          : `$${r.CacheWritePricePer1M}`,
+    },
     { header: "OUTPUT /1M", align: "right", cell: (r) => `$${r.CompletionPricePer1M}` },
     { header: "Updated", cell: (r) => <span className="text-xs text-muted">{formatTimestamp(r.UpdatedAt)}</span> },
     {
@@ -117,7 +133,7 @@ export default function PricingPage() {
     <div className="space-y-6">
       <form onSubmit={submit} className="bg-panel border border-border rounded-lg p-4">
         <h2 className="text-sm uppercase tracking-wider text-muted mb-3">Add or update pricing</h2>
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
           <label className="md:col-span-2 text-sm">
             <span className="text-muted text-xs">Model</span>
             <input
@@ -140,9 +156,15 @@ export default function PricingPage() {
             onChange={(v) => setDraft({ ...draft, prompt_price_per_1m: v })}
           />
           <NumberField
-            label="CACHE /1M"
+            label="CACHE READ /1M"
             value={draft.cache_price_per_1m}
             onChange={(v) => setDraft({ ...draft, cache_price_per_1m: v })}
+          />
+          <NumberField
+            label="CACHE WRITE /1M"
+            placeholder="Input price"
+            value={draft.cache_write_price_per_1m}
+            onChange={(v) => setDraft({ ...draft, cache_write_price_per_1m: v })}
           />
           <NumberField
             label="OUTPUT /1M"
@@ -180,7 +202,17 @@ export default function PricingPage() {
   );
 }
 
-function NumberField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+function NumberField({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
   return (
     <label className="text-sm">
       <span className="text-muted text-xs">{label}</span>
@@ -188,6 +220,7 @@ function NumberField({ label, value, onChange }: { label: string; value: string;
         type="number"
         min="0"
         step="0.0001"
+        placeholder={placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="mt-1 w-full bg-panel2 border border-border rounded px-2 py-1.5 text-sm tabular-nums"

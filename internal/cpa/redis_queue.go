@@ -16,9 +16,13 @@ import (
 // ErrRedisAuth is returned when the CPA management key is rejected.
 var ErrRedisAuth = errors.New("redis queue auth failed")
 
-// RedisQueue speaks the minimal RESP subset CPA needs (AUTH, LPOP).
-// CPA multiplexes RESP onto its HTTP port + 1 (default 8317) by inspecting the
-// first byte of each connection.
+// ErrRedisSubscribeUnsupported indicates that the connected CPA build does
+// not implement Redis-style usage Pub/Sub. Callers may safely fall back to LPOP.
+var ErrRedisSubscribeUnsupported = errors.New("redis usage subscription unsupported")
+
+// RedisQueue speaks the minimal RESP subset CPA needs (AUTH, SUBSCRIBE, LPOP).
+// CPA multiplexes RESP and HTTP on the same TCP port (default 8317) by
+// inspecting the first byte of each connection.
 type RedisQueue struct {
 	address       string
 	managementKey string
@@ -59,6 +63,9 @@ func NewRedisQueue(cfg RedisQueueConfig) *RedisQueue {
 // Address returns the resolved tcp host:port the queue dials.
 func (c *RedisQueue) Address() string { return c.address }
 
+// BatchSize returns the configured persistence batch size.
+func (c *RedisQueue) BatchSize() int { return c.batchSize }
+
 // Probe opens an authenticated connection and immediately closes it.
 func (c *RedisQueue) Probe(ctx context.Context) error {
 	conn, _, err := c.dial(ctx)
@@ -98,6 +105,116 @@ func (c *RedisQueue) PopUsage(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("redis LPOP failed: %s", v.err)
 	}
 	return v.strings(), nil
+}
+
+// SubscribeUsage establishes a Redis-style Pub/Sub subscription to the usage
+// channel. CPA broadcasts new records to every subscriber and stops appending
+// them to the LPOP queue while subscribers are present, so persistent consumers
+// should prefer this stream and use LPOP only to clear pre-subscription backlog.
+func (c *RedisQueue) SubscribeUsage(ctx context.Context) (<-chan string, <-chan error, error) {
+	if c == nil {
+		return nil, nil, fmt.Errorf("redis queue client is nil")
+	}
+	conn, reader, err := c.dial(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	fail := func(err error) (<-chan string, <-chan error, error) {
+		_ = conn.Close()
+		return nil, nil, err
+	}
+	if err := writeRESPCommand(conn, RedisSubscribeCommand, c.queueKey); err != nil {
+		return fail(fmt.Errorf("write SUBSCRIBE: %w", err))
+	}
+	ack, err := readRESPValue(reader)
+	if err != nil {
+		return fail(fmt.Errorf("read SUBSCRIBE response: %w", err))
+	}
+	if ack.err != "" {
+		return fail(fmt.Errorf("%w: %s", ErrRedisSubscribeUnsupported, ack.err))
+	}
+	if !isSubscribeAck(ack, c.queueKey) {
+		return fail(fmt.Errorf("%w: unexpected subscribe response", ErrRedisSubscribeUnsupported))
+	}
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		return fail(fmt.Errorf("clear redis subscription deadline: %w", err))
+	}
+
+	buffer := c.batchSize * 2
+	if buffer < 1024 {
+		buffer = 1024
+	}
+	messages := make(chan string, buffer)
+	errs := make(chan error, 1)
+	go c.readUsageSubscription(ctx, conn, reader, messages, errs)
+	return messages, errs, nil
+}
+
+func (c *RedisQueue) readUsageSubscription(ctx context.Context, conn net.Conn, reader *bufio.Reader, messages chan<- string, errs chan<- error) {
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.Close()
+		case <-done:
+		}
+	}()
+	defer close(done)
+	defer close(messages)
+	defer close(errs)
+	defer conn.Close()
+
+	for {
+		value, err := readRESPValue(reader)
+		if err != nil {
+			if ctx.Err() == nil {
+				errs <- fmt.Errorf("read usage subscription: %w", err)
+			}
+			return
+		}
+		if value.err != "" {
+			errs <- fmt.Errorf("usage subscription failed: %s", value.err)
+			return
+		}
+		payload, ok := pubSubMessage(value, c.queueKey)
+		if !ok || isUsageControlPayload(payload) {
+			continue
+		}
+		select {
+		case messages <- payload:
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func isSubscribeAck(value respValue, channel string) bool {
+	if len(value.array) != 3 {
+		return false
+	}
+	return respString(value.array[0]) == "subscribe" && respString(value.array[1]) == channel
+}
+
+func pubSubMessage(value respValue, channel string) (string, bool) {
+	if len(value.array) != 3 || respString(value.array[0]) != "message" || respString(value.array[1]) != channel {
+		return "", false
+	}
+	if value.array[2].bulk == nil {
+		return "", false
+	}
+	return *value.array[2].bulk, true
+}
+
+func respString(value respValue) string {
+	if value.bulk != nil {
+		return *value.bulk
+	}
+	return value.simple
+}
+
+func isUsageControlPayload(payload string) bool {
+	payload = strings.TrimSpace(payload)
+	return payload == `{"support_refresh":true}` || payload == `{"refresh":true}`
 }
 
 func (c *RedisQueue) dial(ctx context.Context) (net.Conn, *bufio.Reader, error) {

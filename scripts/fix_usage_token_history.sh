@@ -17,6 +17,10 @@ What it changes:
        input_tokens      := max(input_tokens - cached_tokens, 0)
        cache_read_tokens := cached_tokens
 
+     It also repairs rows previously misclassified only because their model
+     name contained "claude" (for example an Antigravity Claude model):
+       input_tokens := max(input_tokens - cache_read_tokens - cache_creation_tokens, 0)
+
   2. Claude/Anthropic rows with detailed cache fields where CPA populated
      cached_tokens from cache creation as a fallback:
        cached_tokens := cache_read_tokens
@@ -85,23 +89,31 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)_pid$$"
 FIX_ID="usage_token_history_fix_${STAMP}"
 BACKUP_TABLE="usage_events_token_fix_backup_${STAMP}"
 
-read -r -d '' PREDICATES <<'SQL' || true
+EXECUTOR_TYPE_EXPR="''"
+if [[ "$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM pragma_table_info('usage_events') WHERE name='executor_type';")" == "1" ]]; then
+  EXECUTOR_TYPE_EXPR="lower(trim(coalesce(executor_type, '')))"
+fi
+
+read -r -d '' PREDICATES <<SQL || true
 WITH classified AS (
   SELECT
     *,
     (
-      lower(coalesce(provider, '')) LIKE '%claude%' OR
-      lower(coalesce(provider, '')) LIKE '%anthropic%' OR
-      lower(coalesce(model, '')) LIKE '%claude%' OR
-      lower(coalesce(model, '')) LIKE '%anthropic%' OR
-      lower(coalesce(endpoint, '')) LIKE '%anthropic%'
+      ${EXECUTOR_TYPE_EXPR} = 'claudeexecutor' OR
+      (
+        ${EXECUTOR_TYPE_EXPR} = '' AND
+        lower(trim(coalesce(provider, ''))) IN ('claude', 'anthropic')
+      )
     ) AS is_claude_style,
     (
+      (${EXECUTOR_TYPE_EXPR} != '' AND ${EXECUTOR_TYPE_EXPR} != 'claudeexecutor') OR
       lower(coalesce(provider, '')) LIKE '%openai%' OR
       lower(coalesce(provider, '')) LIKE '%codex%' OR
       lower(coalesce(provider, '')) LIKE '%gemini%' OR
+      lower(coalesce(provider, '')) LIKE '%interactions%' OR
       lower(coalesce(provider, '')) LIKE '%vertex%' OR
       lower(coalesce(provider, '')) LIKE '%antigravity%' OR
+      lower(coalesce(provider, '')) LIKE '%aistudio%' OR
       lower(coalesce(provider, '')) LIKE '%xai%' OR
       lower(coalesce(provider, '')) LIKE '%kimi%' OR
       lower(coalesce(model, '')) LIKE 'gpt%' OR
@@ -126,6 +138,15 @@ targets AS (
       cache_creation_tokens = 0
     ) AS needs_total_style_split,
     (
+      is_total_input_style = 1 AND
+      is_claude_style = 0 AND
+      (cache_read_tokens != 0 OR cache_creation_tokens != 0) AND
+      (
+        total_tokens = input_tokens + output_tokens OR
+        total_tokens = input_tokens + output_tokens + reasoning_tokens
+      )
+    ) AS needs_explicit_total_style_split,
+    (
       is_claude_style = 1 AND
       (cache_read_tokens != 0 OR cache_creation_tokens != 0) AND
       cached_tokens != cache_read_tokens
@@ -144,7 +165,7 @@ SELECT
   COUNT(*) AS total_rows,
   SUM(CASE WHEN cached_tokens > 0 THEN 1 ELSE 0 END) AS rows_with_cached,
   SUM(CASE WHEN cache_read_tokens != 0 OR cache_creation_tokens != 0 THEN 1 ELSE 0 END) AS rows_with_cache_split,
-  SUM(CASE WHEN needs_total_style_split THEN 1 ELSE 0 END) AS rows_to_split_total_style,
+  SUM(CASE WHEN needs_total_style_split OR needs_explicit_total_style_split THEN 1 ELSE 0 END) AS rows_to_split_total_style,
   SUM(CASE WHEN needs_claude_cached_fix THEN 1 ELSE 0 END) AS rows_to_fix_claude_cached,
   SUM(CASE
     WHEN cached_tokens > 0
@@ -173,12 +194,15 @@ SELECT
   SUM(cache_read_tokens) AS raw_cache_read,
   SUM(cache_creation_tokens) AS raw_cache_write,
   SUM(CASE
-    WHEN needs_total_style_split AND input_tokens > cached_tokens THEN input_tokens - cached_tokens
-    WHEN needs_total_style_split THEN 0
+    WHEN needs_total_style_split AND input_tokens > cached_tokens
+      THEN input_tokens - cached_tokens
+    WHEN needs_explicit_total_style_split AND input_tokens > cache_read_tokens + cache_creation_tokens
+      THEN input_tokens - cache_read_tokens - cache_creation_tokens
+    WHEN needs_total_style_split OR needs_explicit_total_style_split THEN 0
     ELSE input_tokens
   END) AS input_after_fix
 FROM targets
-WHERE needs_total_style_split OR needs_claude_cached_fix
+WHERE needs_total_style_split OR needs_explicit_total_style_split OR needs_claude_cached_fix
 GROUP BY provider, model
 ORDER BY rows DESC
 LIMIT 30;
@@ -191,7 +215,7 @@ if [[ "$APPLY" != "1" ]]; then
 fi
 
 TARGET_COUNT="$(sqlite3 "$DB_PATH" "${PREDICATES}
-SELECT COALESCE(SUM(CASE WHEN needs_total_style_split OR needs_claude_cached_fix THEN 1 ELSE 0 END), 0)
+SELECT COALESCE(SUM(CASE WHEN needs_total_style_split OR needs_explicit_total_style_split OR needs_claude_cached_fix THEN 1 ELSE 0 END), 0)
 FROM targets;")"
 if [[ "$TARGET_COUNT" == "0" ]]; then
   echo
@@ -221,7 +245,7 @@ CREATE TABLE "${BACKUP_TABLE}" AS
 ${PREDICATES}
 SELECT *
 FROM targets
-WHERE needs_total_style_split OR needs_claude_cached_fix;
+WHERE needs_total_style_split OR needs_explicit_total_style_split OR needs_claude_cached_fix;
 
 INSERT INTO usage_token_history_fix_runs (
   fix_id,
@@ -235,7 +259,7 @@ SELECT
   '${FIX_ID}',
   datetime('now'),
   '${BACKUP_TABLE}',
-  COALESCE(SUM(CASE WHEN needs_total_style_split THEN 1 ELSE 0 END), 0),
+  COALESCE(SUM(CASE WHEN needs_total_style_split OR needs_explicit_total_style_split THEN 1 ELSE 0 END), 0),
   COALESCE(SUM(CASE WHEN needs_claude_cached_fix THEN 1 ELSE 0 END), 0)
 FROM targets;
 
@@ -251,6 +275,19 @@ WHERE id IN (
   SELECT id
   FROM targets
   WHERE needs_total_style_split
+);
+
+UPDATE usage_events
+SET input_tokens = CASE
+  WHEN input_tokens > cache_read_tokens + cache_creation_tokens
+    THEN input_tokens - cache_read_tokens - cache_creation_tokens
+  ELSE 0
+END
+WHERE id IN (
+  ${PREDICATES}
+  SELECT id
+  FROM targets
+  WHERE needs_explicit_total_style_split
 );
 
 UPDATE usage_events

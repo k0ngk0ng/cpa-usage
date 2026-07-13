@@ -6,10 +6,10 @@ CPA v6.10 removed the legacy `/v0/management/usage/{export,import}` HTTP endpoin
 
 ## What it does
 
-- Drains CPA's Redis usage queue (LPOP loop) and persists records as deduplicated `usage_events` rows
+- Subscribes to CPA's Redis usage stream, drains pre-subscription LPOP backlog, and persists every distinct provider-call record
 - Periodically refreshes auth-files and provider catalogs from CPA management API
 - Reads per-request logs from `CPA_LOG_DIR`, falling back to CPA's authenticated `request-log-by-id` management endpoint when the filesystem is not shared
-- Computes per-model cost from configurable price-per-1M-token settings
+- Computes per-model cost from configurable input, output, cache-read, and cache-write price-per-1M-token settings
 - Serves an API + SPA at `/usage/*` (subpath configurable)
 - Optional JWT cookie-based password login
 - Daily 03:00 retention sweep (drops events older than 30 days, then `VACUUM`)
@@ -71,7 +71,7 @@ All configuration is via environment variables (also see `.env.example`):
 | `SQLITE_PATH` | `./data/app.db` | Resolved against the process working directory |
 | `REDIS_QUEUE_ADDR` | — | Defaults to `<cpa-host>:8317` |
 | `REDIS_QUEUE_KEY` | `usage` | RESP channel name; CPA v7+ rejects the old `queue` key |
-| `REDIS_QUEUE_BATCH_SIZE` | `1000` | |
+| `REDIS_QUEUE_BATCH_SIZE` | `1000` | Subscription persistence batch size and LPOP backlog batch size |
 | `REDIS_QUEUE_IDLE_INTERVAL` | `1s` | |
 | `REDIS_QUEUE_ERROR_BACKOFF` | `10s` | |
 | `METADATA_SYNC_INTERVAL` | `30s` | |
@@ -82,6 +82,10 @@ All configuration is via environment variables (also see `.env.example`):
 | `LOG_FILE_ENABLED` | `true` | |
 | `LOG_DIR` | `./logs` | Resolved against the process working directory |
 | `LOG_RETENTION_DAYS` | `7` | Lumberjack max-age + max-backups |
+
+On the Pricing page, Cache Write is independently configurable. Leaving it
+blank uses the model's Input price, which preserves sensible costing for older
+price rows while still allowing an explicit zero or provider-specific write rate.
 
 ## API surface
 
@@ -118,7 +122,7 @@ Common query params: `range=all|today|4h|8h|12h|24h|2d|3d|4d|5d|6d|7d|30d|custom
 ## Architecture
 
 ```
-CPA (Redis queue on tcp/8317)
+CPA (Redis SUBSCRIBE + LPOP backlog on tcp/8317)
         │
         ▼
 internal/cpa/redis_queue ──► internal/ingest/decoder ──► storage.Store.InsertUsageEvents
@@ -135,6 +139,11 @@ internal/cpa/client ──► internal/metadata.Service             │
 ```
 
 `storage.Store` is the only seam between the service layer and the database; v1 ships a single `internal/storage/sqlite` implementation, but new drivers (mysql, postgres, clickhouse) can plug in by satisfying the interface.
+
+CPA emits one usage record per upstream provider call. Retries and auxiliary
+models such as Codex image generation may therefore share a `request_id`.
+`cpa-usage` keeps `request_id` as a searchable, non-unique correlation ID and
+deduplicates exact queue records with a content-derived `event_key`.
 
 ## Layout
 

@@ -129,6 +129,11 @@ func (c *Client) FetchGeminiKeys(ctx context.Context) ([]ProviderKeyConfig, erro
 	return c.fetchProviderKeyConfig(ctx, managementGeminiKeysEndpoint, "gemini-api-key")
 }
 
+// FetchInteractionsKeys returns the native Google Interactions provider catalog.
+func (c *Client) FetchInteractionsKeys(ctx context.Context) ([]ProviderKeyConfig, error) {
+	return c.fetchProviderKeyConfig(ctx, managementInteractionsEndpoint, "interactions-api-key")
+}
+
 // FetchClaudeKeys returns the claude provider catalog.
 func (c *Client) FetchClaudeKeys(ctx context.Context) ([]ProviderKeyConfig, error) {
 	return c.fetchProviderKeyConfig(ctx, managementClaudeKeysEndpoint, "claude-api-key")

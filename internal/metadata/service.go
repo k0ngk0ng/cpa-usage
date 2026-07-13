@@ -110,31 +110,40 @@ func (s *Service) Sync(ctx context.Context) error {
 
 func (s *Service) collectProviderMetadata(ctx context.Context) ([]storage.ProviderMetadata, error) {
 	out := make([]storage.ProviderMetadata, 0, 32)
-	seen := make(map[string]struct{})
+	seen := make(map[string]int)
 	add := func(item storage.ProviderMetadata) {
-		key := item.ProviderType + "|" + item.LookupKey
-		if _, ok := seen[key]; ok {
+		key := item.LookupKey
+		if index, ok := seen[key]; ok {
+			if out[index].DisplayName == "" && item.DisplayName != "" {
+				out[index] = item
+			}
 			return
 		}
-		seen[key] = struct{}{}
+		seen[key] = len(out)
 		out = append(out, item)
 	}
 
 	type providerFetch struct {
-		kind  string
-		fetch func(ctx context.Context) ([]cpa.ProviderKeyConfig, error)
+		kind     string
+		fetch    func(ctx context.Context) ([]cpa.ProviderKeyConfig, error)
+		optional bool
 	}
 	providerFetches := []providerFetch{
-		{"gemini", s.client.FetchGeminiKeys},
-		{"claude", s.client.FetchClaudeKeys},
-		{"codex", s.client.FetchCodexKeys},
-		{"vertex", s.client.FetchVertexKeys},
+		{kind: "gemini", fetch: s.client.FetchGeminiKeys},
+		{kind: "interactions", fetch: s.client.FetchInteractionsKeys, optional: true},
+		{kind: "claude", fetch: s.client.FetchClaudeKeys},
+		{kind: "codex", fetch: s.client.FetchCodexKeys},
+		{kind: "vertex", fetch: s.client.FetchVertexKeys},
 	}
 
 	var firstErr error
 	for _, pf := range providerFetches {
 		entries, err := pf.fetch(ctx)
 		if err != nil {
+			if pf.optional {
+				s.logger.WithError(err).WithField("kind", pf.kind).Debug("metadata: optional provider keys unavailable")
+				continue
+			}
 			s.logger.WithError(err).WithField("kind", pf.kind).Warn("metadata: fetch provider keys failed")
 			if firstErr == nil {
 				firstErr = err

@@ -37,6 +37,7 @@ func (s *Service) Reload(ctx context.Context) error {
 	}
 	cache := make(map[string]storage.ModelPriceSetting, len(rows))
 	for _, r := range rows {
+		r.CacheWritePricePer1M = clonePricePtr(r.CacheWritePricePer1M)
 		cache[r.Model] = r
 	}
 	s.mu.Lock()
@@ -52,9 +53,18 @@ func (s *Service) Snapshot() map[string]storage.ModelPriceSetting {
 	defer s.mu.RUnlock()
 	out := make(map[string]storage.ModelPriceSetting, len(s.prices))
 	for k, v := range s.prices {
+		v.CacheWritePricePer1M = clonePricePtr(v.CacheWritePricePer1M)
 		out[k] = v
 	}
 	return out
+}
+
+func clonePricePtr(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 // List returns prices ordered by model name (UI-friendly).
@@ -68,7 +78,8 @@ func (s *Service) Upsert(ctx context.Context, p storage.ModelPriceSetting) error
 	if p.Model == "" {
 		return errors.New("model is required")
 	}
-	if p.PromptPricePer1M < 0 || p.CompletionPricePer1M < 0 || p.CachePricePer1M < 0 {
+	if p.PromptPricePer1M < 0 || p.CompletionPricePer1M < 0 || p.CachePricePer1M < 0 ||
+		(p.CacheWritePricePer1M != nil && *p.CacheWritePricePer1M < 0) {
 		return errors.New("price must be non-negative")
 	}
 	p.UpdatedAt = time.Now().UTC()

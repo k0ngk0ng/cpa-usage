@@ -49,6 +49,32 @@ func TestClientDownloadRequestLog(t *testing.T) {
 	}
 }
 
+func TestClientFetchInteractionsKeys(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v0/management/interactions-api-key" {
+			t.Errorf("path = %q", r.URL.Path)
+			http.Error(w, "unexpected path", http.StatusBadRequest)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer secret" {
+			t.Errorf("Authorization = %q", got)
+			http.Error(w, "unexpected authorization", http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte(`{"interactions-api-key":[{"api-key":"interaction-key","prefix":"native"}]}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "secret", time.Second)
+	items, err := client.FetchInteractionsKeys(context.Background())
+	if err != nil {
+		t.Fatalf("FetchInteractionsKeys: %v", err)
+	}
+	if len(items) != 1 || items[0].APIKey != "interaction-key" || items[0].Prefix != "native" {
+		t.Fatalf("items = %#v", items)
+	}
+}
+
 func TestClientDownloadRequestLogNotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "missing", http.StatusNotFound)

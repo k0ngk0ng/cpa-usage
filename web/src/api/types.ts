@@ -110,6 +110,7 @@ export interface UsageEventRecord {
   event_key: string;
   timestamp: string;
   provider: string;
+  executor_type: string;
   model: string;
   alias: string;
   api_group_key: string;
@@ -135,6 +136,8 @@ export interface UsageEventRecord {
   response_headers?: Record<string, string[]>;
   reasoning_effort: string;
   service_tier: string;
+  request_service_tier: string;
+  response_service_tier: string;
   cost: number;
 }
 
@@ -219,6 +222,7 @@ export interface ModelPriceSetting {
   PromptPricePer1M: number;
   CompletionPricePer1M: number;
   CachePricePer1M: number;
+  CacheWritePricePer1M: number | null;
   UpdatedAt: string;
 }
 
@@ -227,10 +231,12 @@ export interface PricingUpsertRequest {
   prompt_price_per_1m: number;
   completion_price_per_1m: number;
   cache_price_per_1m: number;
+  cache_write_price_per_1m?: number;
 }
 
 export interface DrainStatus {
   redis_address: string;
+  redis_mode: string;
   last_pop_at: string;
   last_inserted_at: string;
   last_error_at: string;

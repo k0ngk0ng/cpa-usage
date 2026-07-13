@@ -140,6 +140,23 @@ export default function EventsPage() {
       ),
     },
     {
+      header: "Provider",
+      cellClassName: "max-w-[12rem]",
+      cell: (r) => {
+        const requestTier = r.request_service_tier || r.service_tier;
+        const tier = r.response_service_tier
+          ? `${requestTier || "default"} → ${r.response_service_tier}`
+          : requestTier;
+        return (
+          <div className="truncate" title={r.executor_type || r.provider}>
+            <div className="truncate">{r.provider || "—"}</div>
+            {r.executor_type && <div className="text-[10px] text-muted truncate">{r.executor_type}</div>}
+            {tier && <div className="text-[10px] text-muted truncate">tier {tier}</div>}
+          </div>
+        );
+      },
+    },
+    {
       header: "API",
       cellClassName: "max-w-[14rem]",
       cell: (r) => (

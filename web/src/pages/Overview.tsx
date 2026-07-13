@@ -80,7 +80,7 @@ export default function Overview() {
 
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
         <MetricCard
-          label="Total"
+          label="Upstream calls"
           value={formatNumber(summary?.total ?? 0)}
           hint={
             summary && summary.total > 0
@@ -131,7 +131,7 @@ export default function Overview() {
         <div className="grid gap-6 xl:grid-cols-2">
           <div>
             <h2 className="text-sm uppercase tracking-wider text-muted mb-2">
-              {useDaily ? "Daily requests" : "Hourly requests"}
+              {useDaily ? "Daily upstream calls" : "Hourly upstream calls"}
             </h2>
             {loading && !data ? (
               <div className="bg-panel border border-border rounded-lg p-8 text-center text-muted text-sm">
@@ -156,7 +156,7 @@ export default function Overview() {
         </div>
 
         <div>
-          <h2 className="text-sm uppercase tracking-wider text-muted mb-2">Request matrix</h2>
+          <h2 className="text-sm uppercase tracking-wider text-muted mb-2">Upstream call matrix</h2>
           {healthErr && (
             <div className="bg-danger/10 border border-danger/30 text-danger rounded-lg p-3 text-sm mb-4">
               {healthErr}

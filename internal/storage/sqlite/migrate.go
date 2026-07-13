@@ -8,6 +8,7 @@ type usageEventModel struct {
 	EventKey            string    `gorm:"uniqueIndex;size:128"`
 	Timestamp           time.Time `gorm:"index"`
 	Provider            string    `gorm:"size:64;index"`
+	ExecutorType        string    `gorm:"size:128;index"`
 	Model               string    `gorm:"size:128;index"`
 	Alias               string    `gorm:"size:128"`
 	APIGroupKey         string    `gorm:"size:128;index;column:api_group_key"`
@@ -32,6 +33,8 @@ type usageEventModel struct {
 	ResponseHeaders     string
 	ReasoningEffort     string `gorm:"size:64"`
 	ServiceTier         string `gorm:"size:64"`
+	RequestServiceTier  string `gorm:"size:64"`
+	ResponseServiceTier string `gorm:"size:64"`
 	InsertedAt          time.Time
 }
 
@@ -68,11 +71,12 @@ type providerMetadataModel struct {
 func (providerMetadataModel) TableName() string { return "provider_metadata" }
 
 type modelPriceSettingModel struct {
-	ID                   uint    `gorm:"primaryKey"`
-	Model                string  `gorm:"uniqueIndex;size:128"`
-	PromptPricePer1M     float64 `gorm:"column:prompt_price_per_1m"`
-	CompletionPricePer1M float64 `gorm:"column:completion_price_per_1m"`
-	CachePricePer1M      float64 `gorm:"column:cache_price_per_1m"`
+	ID                   uint     `gorm:"primaryKey"`
+	Model                string   `gorm:"uniqueIndex;size:128"`
+	PromptPricePer1M     float64  `gorm:"column:prompt_price_per_1m"`
+	CompletionPricePer1M float64  `gorm:"column:completion_price_per_1m"`
+	CachePricePer1M      float64  `gorm:"column:cache_price_per_1m"`
+	CacheWritePricePer1M *float64 `gorm:"column:cache_write_price_per_1m"`
 	UpdatedAt            time.Time
 }
 

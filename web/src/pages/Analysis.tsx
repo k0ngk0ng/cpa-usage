@@ -9,7 +9,7 @@ import type { UsageAggregationRow, UsageAnalysis } from "../api/types";
 
 const numericColumns = (): Column<UsageAggregationRow>[] => [
   {
-    header: "Total",
+    header: "Calls",
     align: "right",
     cell: (r) => formatNumber(r.total),
   },

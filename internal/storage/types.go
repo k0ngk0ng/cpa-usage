@@ -7,9 +7,10 @@ import (
 
 // UsageEvent is one row decoded from the CPA redis usage queue.
 type UsageEvent struct {
-	EventKey            string // request_id from CPA payload, used as dedup key
+	EventKey            string // content-derived usage record ID, used as dedup key
 	Timestamp           time.Time
 	Provider            string
+	ExecutorType        string
 	Model               string
 	Alias               string
 	APIGroupKey         string // api_key | provider | endpoint | "unknown"
@@ -34,6 +35,8 @@ type UsageEvent struct {
 	ResponseHeaders     string
 	ReasoningEffort     string
 	ServiceTier         string
+	RequestServiceTier  string
+	ResponseServiceTier string
 	InsertedAt          time.Time
 }
 
@@ -77,6 +80,8 @@ type ModelPriceSetting struct {
 	PromptPricePer1M     float64
 	CompletionPricePer1M float64
 	CachePricePer1M      float64
+	// CacheWritePricePer1M falls back to PromptPricePer1M when nil.
+	CacheWritePricePer1M *float64
 	UpdatedAt            time.Time
 }
 
@@ -137,6 +142,7 @@ type UsageEventRecord struct {
 	EventKey            string          `json:"event_key"`
 	Timestamp           time.Time       `json:"timestamp"`
 	Provider            string          `json:"provider"`
+	ExecutorType        string          `json:"executor_type"`
 	Model               string          `json:"model"`
 	Alias               string          `json:"alias"`
 	APIGroupKey         string          `json:"api_group_key"`
@@ -162,6 +168,8 @@ type UsageEventRecord struct {
 	ResponseHeaders     json.RawMessage `json:"response_headers,omitempty"`
 	ReasoningEffort     string          `json:"reasoning_effort"`
 	ServiceTier         string          `json:"service_tier"`
+	RequestServiceTier  string          `json:"request_service_tier"`
+	ResponseServiceTier string          `json:"response_service_tier"`
 	Cost                float64         `json:"cost"`
 }
 

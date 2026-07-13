@@ -11,6 +11,7 @@ const (
 	managementAuthFilesEndpoint    = "/v0/management/auth-files"
 	managementExternalKeysEndpoint = "/v0/management/api-keys"
 	managementGeminiKeysEndpoint   = "/v0/management/gemini-api-key"
+	managementInteractionsEndpoint = "/v0/management/interactions-api-key"
 	managementClaudeKeysEndpoint   = "/v0/management/claude-api-key"
 	managementCodexKeysEndpoint    = "/v0/management/codex-api-key"
 	managementVertexKeysEndpoint   = "/v0/management/vertex-api-key"
@@ -18,12 +19,13 @@ const (
 	managementRequestLogEndpoint   = "/v0/management/request-log-by-id/"
 	modelsEndpoint                 = "/v1/models"
 
-	// Redis queue (RESP TCP) constants — multiplexed on CPA's HTTP port + 1 by default (8317).
-	redisNetwork       = "tcp"
-	RedisDefaultPort   = "8317"
-	RedisAuthCommand   = "AUTH"
-	RedisLPopCommand   = "LPOP"
-	RedisUsageQueueKey = "usage"
+	// Redis queue (RESP TCP) constants — multiplexed on CPA's HTTP port (8317 by default).
+	redisNetwork          = "tcp"
+	RedisDefaultPort      = "8317"
+	RedisAuthCommand      = "AUTH"
+	RedisLPopCommand      = "LPOP"
+	RedisSubscribeCommand = "SUBSCRIBE"
+	RedisUsageQueueKey    = "usage"
 )
 
 // AuthFile mirrors a single entry from /v0/management/auth-files.
@@ -182,24 +184,27 @@ func firstString(raw map[string]any, keys ...string) string {
 // CPA encodes timestamps as RFC3339 strings; deserialization tolerates both string
 // and object container shapes via Tokens.
 type UsageRecord struct {
-	Timestamp       time.Time       `json:"timestamp"`
-	LatencyMs       int64           `json:"latency_ms"`
-	TTFTMs          int64           `json:"ttft_ms"`
-	Source          string          `json:"source"`
-	AuthIndex       string          `json:"auth_index"`
-	Tokens          UsageTokens     `json:"tokens"`
-	Failed          bool            `json:"failed"`
-	Fail            UsageFail       `json:"fail"`
-	ResponseHeaders json.RawMessage `json:"response_headers"`
-	Provider        string          `json:"provider"`
-	Model           string          `json:"model"`
-	Alias           string          `json:"alias"`
-	Endpoint        string          `json:"endpoint"`
-	AuthType        string          `json:"auth_type"`
-	APIKey          string          `json:"api_key"`
-	RequestID       string          `json:"request_id"`
-	ReasoningEffort string          `json:"reasoning_effort"`
-	ServiceTier     string          `json:"service_tier"`
+	Timestamp           time.Time       `json:"timestamp"`
+	LatencyMs           int64           `json:"latency_ms"`
+	TTFTMs              int64           `json:"ttft_ms"`
+	Source              string          `json:"source"`
+	AuthIndex           string          `json:"auth_index"`
+	Tokens              UsageTokens     `json:"tokens"`
+	Failed              bool            `json:"failed"`
+	Fail                UsageFail       `json:"fail"`
+	ResponseHeaders     json.RawMessage `json:"response_headers"`
+	Provider            string          `json:"provider"`
+	ExecutorType        string          `json:"executor_type"`
+	Model               string          `json:"model"`
+	Alias               string          `json:"alias"`
+	Endpoint            string          `json:"endpoint"`
+	AuthType            string          `json:"auth_type"`
+	APIKey              string          `json:"api_key"`
+	RequestID           string          `json:"request_id"`
+	ReasoningEffort     string          `json:"reasoning_effort"`
+	ServiceTier         string          `json:"service_tier"`
+	RequestServiceTier  string          `json:"request_service_tier"`
+	ResponseServiceTier string          `json:"response_service_tier"`
 }
 
 // UsageTokens is the nested token stats object from CPA.

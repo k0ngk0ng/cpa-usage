@@ -104,6 +104,7 @@ func statusHandler(deps MetaDeps) gin.HandlerFunc {
 		}
 		c.JSON(http.StatusOK, gin.H{
 			"redis_address":         status.RedisAddress,
+			"redis_mode":            status.RedisMode,
 			"last_pop_at":           status.LastPopAt,
 			"last_inserted_at":      status.LastInsertedAt,
 			"last_error_at":         status.LastErrorAt,

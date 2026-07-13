@@ -44,14 +44,14 @@ export default function HealthGrid({ health, filter, selectedDay, onYearChange, 
   return (
     <div className="bg-panel border border-border rounded-lg p-4">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-        <h3 className="text-sm font-medium">Request matrix</h3>
+        <h3 className="text-sm font-medium">Upstream call matrix</h3>
         <div className="flex flex-wrap items-center gap-3">
           <Legend />
           <select
             value={String(health.year)}
             onChange={(e) => onYearChange(e.target.value)}
             className="bg-panel2 border border-border rounded px-2 py-1 text-xs text-ink"
-            title="Request matrix year"
+            title="Upstream call matrix year"
           >
             {years.map((y) => (
               <option key={y.year} value={y.year}>
@@ -128,7 +128,7 @@ function YearDayCell({
   const day = cell.day;
   const total = day?.total ?? 0;
   const failed = day?.failed ?? 0;
-  const title = `${cell.key} — ${total} requests, ${failed} failed`;
+  const title = `${cell.key} — ${total} upstream calls, ${failed} failed`;
   return (
     <button
       type="button"
@@ -165,7 +165,7 @@ function DayDetail({ day, grid, filter }: { day: string; grid: HealthCell[][]; f
                 {detailRowLabel(ri)}
               </div>
               {row.map((cell, ci) => {
-                const title = `${formatTimestamp(cell.bucket)} — ${cell.total} requests, ${cell.failed} failed`;
+                const title = `${formatTimestamp(cell.bucket)} — ${cell.total} upstream calls, ${cell.failed} failed`;
                 return (
                   <div key={`${ri}-${ci}`} className="flex h-5 items-center justify-center">
                     {cell.total > 0 && cell.bucket ? (

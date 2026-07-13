@@ -16,10 +16,11 @@ type PricingDeps struct {
 }
 
 type pricingRequest struct {
-	Model                string  `json:"model"`
-	PromptPricePer1M     float64 `json:"prompt_price_per_1m"`
-	CompletionPricePer1M float64 `json:"completion_price_per_1m"`
-	CachePricePer1M      float64 `json:"cache_price_per_1m"`
+	Model                string   `json:"model"`
+	PromptPricePer1M     float64  `json:"prompt_price_per_1m"`
+	CompletionPricePer1M float64  `json:"completion_price_per_1m"`
+	CachePricePer1M      float64  `json:"cache_price_per_1m"`
+	CacheWritePricePer1M *float64 `json:"cache_write_price_per_1m"`
 }
 
 func listPricingHandler(deps PricingDeps) gin.HandlerFunc {
@@ -49,6 +50,7 @@ func upsertPricingHandler(deps PricingDeps) gin.HandlerFunc {
 			PromptPricePer1M:     req.PromptPricePer1M,
 			CompletionPricePer1M: req.CompletionPricePer1M,
 			CachePricePer1M:      req.CachePricePer1M,
+			CacheWritePricePer1M: req.CacheWritePricePer1M,
 		}); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return

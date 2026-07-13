@@ -36,6 +36,7 @@ func (s *Store) InsertUsageEvents(ctx context.Context, events []storage.UsageEve
 			EventKey:            e.EventKey,
 			Timestamp:           e.Timestamp.UTC(),
 			Provider:            e.Provider,
+			ExecutorType:        e.ExecutorType,
 			Model:               e.Model,
 			Alias:               e.Alias,
 			APIGroupKey:         e.APIGroupKey,
@@ -60,6 +61,8 @@ func (s *Store) InsertUsageEvents(ctx context.Context, events []storage.UsageEve
 			ResponseHeaders:     e.ResponseHeaders,
 			ReasoningEffort:     e.ReasoningEffort,
 			ServiceTier:         e.ServiceTier,
+			RequestServiceTier:  e.RequestServiceTier,
+			ResponseServiceTier: e.ResponseServiceTier,
 			InsertedAt:          insertedAt,
 		})
 	}
@@ -195,7 +198,7 @@ func (s *Store) applyFilter(ctx context.Context, f storage.UsageFilter) *gorm.DB
 }
 
 // computeCost evaluates per-event cost given the model price catalog.
-func computeCost(model string, input, completion, cached int64, prices map[string]storage.ModelPriceSetting) float64 {
+func computeCost(model string, input, completion, cacheRead, cacheWrite int64, prices map[string]storage.ModelPriceSetting) float64 {
 	if prices == nil {
 		return 0
 	}
@@ -204,9 +207,14 @@ func computeCost(model string, input, completion, cached int64, prices map[strin
 		return 0
 	}
 	const oneM = 1_000_000.0
+	cacheWritePrice := p.PromptPricePer1M
+	if p.CacheWritePricePer1M != nil {
+		cacheWritePrice = *p.CacheWritePricePer1M
+	}
 	cost := float64(input)/oneM*p.PromptPricePer1M +
 		float64(completion)/oneM*p.CompletionPricePer1M +
-		float64(cached)/oneM*p.CachePricePer1M
+		float64(cacheRead)/oneM*p.CachePricePer1M +
+		float64(cacheWrite)/oneM*cacheWritePrice
 	return cost
 }
 
@@ -247,6 +255,7 @@ func (s *Store) ListUsageEvents(ctx context.Context, f storage.UsageFilter, p st
 			EventKey:            r.EventKey,
 			Timestamp:           r.Timestamp,
 			Provider:            r.Provider,
+			ExecutorType:        r.ExecutorType,
 			Model:               r.Model,
 			Alias:               r.Alias,
 			APIGroupKey:         r.APIGroupKey,
@@ -270,7 +279,9 @@ func (s *Store) ListUsageEvents(ctx context.Context, f storage.UsageFilter, p st
 			ResponseHeaders:     rawJSON(r.ResponseHeaders),
 			ReasoningEffort:     r.ReasoningEffort,
 			ServiceTier:         r.ServiceTier,
-			Cost:                computeCost(r.Model, r.InputTokens, r.OutputTokens, r.CachedTokens, prices),
+			RequestServiceTier:  firstNonEmpty(r.RequestServiceTier, r.ServiceTier),
+			ResponseServiceTier: r.ResponseServiceTier,
+			Cost:                computeCost(r.Model, r.InputTokens, r.OutputTokens, r.CachedTokens, r.CacheCreationTokens, prices),
 		})
 	}
 	totalPages := int((total + int64(p.PageSize) - 1) / int64(p.PageSize))
@@ -409,7 +420,7 @@ func (s *Store) ListUsageAnalysis(ctx context.Context, f storage.UsageFilter, pr
 			CacheReadTokens:     r.CacheReadTokens,
 			CacheCreationTokens: r.CacheCreationTokens,
 			TotalTokens:         r.TotalTokens,
-			Cost:                costFromTotals(r.Model, r.InputTokens, r.OutputTokens, r.CachedTokens, prices),
+			Cost:                costFromTotals(r.Model, r.InputTokens, r.OutputTokens, r.CachedTokens, r.CacheCreationTokens, prices),
 		}
 		out.ByAPIAndModel = append(out.ByAPIAndModel, row)
 
@@ -466,8 +477,8 @@ func sortAgg(rows []storage.UsageAggregationRow) {
 	})
 }
 
-func costFromTotals(model string, input, output, cached int64, prices map[string]storage.ModelPriceSetting) float64 {
-	return computeCost(model, input, output, cached, prices)
+func costFromTotals(model string, input, output, cacheRead, cacheWrite int64, prices map[string]storage.ModelPriceSetting) float64 {
+	return computeCost(model, input, output, cacheRead, cacheWrite, prices)
 }
 
 // BuildUsageOverview returns the summary, hourly+daily series and a range-sized 15-minute health grid.
@@ -505,21 +516,22 @@ func (s *Store) BuildUsageOverview(ctx context.Context, f storage.UsageFilter, p
 
 	// For cost across models we need to iterate per-model totals.
 	type byModelRow struct {
-		Model        string
-		InputTokens  int64
-		OutputTokens int64
-		CachedTokens int64
+		Model               string
+		InputTokens         int64
+		OutputTokens        int64
+		CachedTokens        int64
+		CacheCreationTokens int64
 	}
 	var perModel []byModelRow
 	if err := s.applyFilter(ctx, f).
-		Select("model, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, SUM(cached_tokens) AS cached_tokens").
+		Select("model, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, SUM(cached_tokens) AS cached_tokens, SUM(cache_creation_tokens) AS cache_creation_tokens").
 		Group("model").
 		Scan(&perModel).Error; err != nil {
 		return nil, err
 	}
 	cost := 0.0
 	for _, m := range perModel {
-		cost += computeCost(m.Model, m.InputTokens, m.OutputTokens, m.CachedTokens, prices)
+		cost += computeCost(m.Model, m.InputTokens, m.OutputTokens, m.CachedTokens, m.CacheCreationTokens, prices)
 	}
 
 	// Hourly (last 24h) + daily (last 7d) series via SQL bucketing using strftime.
@@ -820,7 +832,7 @@ func foldBuckets(rows []bucketRow, start, end time.Time, step time.Duration, pri
 		b.CacheReadTokens += r.CacheReadTokens
 		b.CacheCreationTokens += r.CacheCreationTokens
 		b.TotalTokens += r.TotalTokens
-		b.Cost += computeCost(r.Model, r.InputTokens, r.OutputTokens, r.CachedTokens, prices)
+		b.Cost += computeCost(r.Model, r.InputTokens, r.OutputTokens, r.CachedTokens, r.CacheCreationTokens, prices)
 	}
 	out := make([]storage.UsageBucket, 0)
 	for t := start.UTC().Truncate(step); t.Before(end); t = t.Add(step) {
@@ -856,7 +868,7 @@ func foldBucketsDaily(rows []bucketRow, start, end time.Time, prices map[string]
 		b.CacheReadTokens += r.CacheReadTokens
 		b.CacheCreationTokens += r.CacheCreationTokens
 		b.TotalTokens += r.TotalTokens
-		b.Cost += computeCost(r.Model, r.InputTokens, r.OutputTokens, r.CachedTokens, prices)
+		b.Cost += computeCost(r.Model, r.InputTokens, r.OutputTokens, r.CachedTokens, r.CacheCreationTokens, prices)
 	}
 	out := make([]storage.UsageBucket, 0)
 	startLocal := startOfDayLocal(start)
@@ -869,6 +881,15 @@ func foldBucketsDaily(rows []bucketRow, start, end time.Time, prices map[string]
 		}
 	}
 	return out
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func startOfDay(t time.Time) time.Time {

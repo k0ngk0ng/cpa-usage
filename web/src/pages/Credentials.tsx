@@ -50,7 +50,7 @@ export default function CredentialsPage() {
       header: "Auth Index",
       cell: (r) => <span className="font-mono text-xs">{r.auth_index || "—"}</span>,
     },
-    { header: "Total", align: "right", cell: (r) => formatNumber(r.total) },
+    { header: "Calls", align: "right", cell: (r) => formatNumber(r.total) },
     {
       header: "Success",
       align: "right",

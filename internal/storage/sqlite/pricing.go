@@ -39,6 +39,7 @@ func (s *Store) ListPricing(ctx context.Context) ([]storage.ModelPriceSetting, e
 			PromptPricePer1M:     r.PromptPricePer1M,
 			CompletionPricePer1M: r.CompletionPricePer1M,
 			CachePricePer1M:      r.CachePricePer1M,
+			CacheWritePricePer1M: cloneFloat64Ptr(r.CacheWritePricePer1M),
 			UpdatedAt:            r.UpdatedAt,
 		})
 	}
@@ -56,6 +57,7 @@ func (s *Store) UpsertPricing(ctx context.Context, p storage.ModelPriceSetting) 
 		PromptPricePer1M:     p.PromptPricePer1M,
 		CompletionPricePer1M: p.CompletionPricePer1M,
 		CachePricePer1M:      p.CachePricePer1M,
+		CacheWritePricePer1M: cloneFloat64Ptr(p.CacheWritePricePer1M),
 		UpdatedAt:            time.Now().UTC(),
 	}
 	return s.dbCtx(ctx).
@@ -65,10 +67,19 @@ func (s *Store) UpsertPricing(ctx context.Context, p storage.ModelPriceSetting) 
 				"prompt_price_per_1m",
 				"completion_price_per_1m",
 				"cache_price_per_1m",
+				"cache_write_price_per_1m",
 				"updated_at",
 			}),
 		}).
 		Create(&row).Error
+}
+
+func cloneFloat64Ptr(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 // DeletePricing removes the pricing row for the supplied model.
