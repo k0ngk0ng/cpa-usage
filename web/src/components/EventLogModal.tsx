@@ -1473,6 +1473,7 @@ const ChatView = memo(function ChatView({
   rootRef?: React.Ref<HTMLDivElement>;
   locatedTurnIndex?: number;
 }) {
+  const toolNamesByCallID = useMemo(() => collectToolCallNames(turns), [turns]);
   const [expandedTools, setExpandedTools] = useState<Set<number>>(
     () => new Set(
       turns.flatMap((turn, index) =>
@@ -1521,13 +1522,14 @@ const ChatView = memo(function ChatView({
         const copyText = rawText ?? turnText(turn);
         const bubbleClass = isTool ? "chat-bubble-tool" : chatBubbleClass(turn.role);
         const parts = rawExpanded || collapsed ? null : visualContentParts(turn);
+        const roleLabel = isTool ? toolTurnRoleLabel(turn) : turn.role;
         return (
           <div
             key={index}
             data-chat-turn-index={index}
             className={clsx(
               "chat-row",
-              turn.role.toLowerCase() === "user" ? "chat-row-user" : "chat-row-left",
+              isRightAlignedTurn(turn) ? "chat-row-user" : "chat-row-left",
               isUserQuestion && "chat-row-user-question",
               index === locatedTurnIndex && "chat-row-located",
             )}
@@ -1538,7 +1540,7 @@ const ChatView = memo(function ChatView({
             >
               <div className="chat-meta" data-final-search-ignore>
                 <span className={clsx("role-badge", isTool ? "role-badge-tool" : roleBadgeClass(turn.role))}>
-                  {turn.role}
+                  {roleLabel}
                 </span>
                 <span className="chat-turn">#{index + 1}</span>
                 <div className="chat-actions">
@@ -1569,10 +1571,14 @@ const ChatView = memo(function ChatView({
               {rawExpanded ? (
                 <pre className="chat-raw-json">{rawText}</pre>
               ) : collapsed ? (
-                <div className="chat-preview">{chatPreview(turn)}</div>
+                <div className="chat-preview">{chatPreview(turn, toolNamesByCallID)}</div>
               ) : parts ? (
                 <>
-                  <StructuredContentParts parts={parts} fallbackText={turnText(turn)} />
+                  <StructuredContentParts
+                    parts={parts}
+                    fallbackText={turnText(turn)}
+                    toolNamesByCallID={toolNamesByCallID}
+                  />
                   {turn.attachments?.length ? (
                     <div className="chat-attachments">attachments: {turn.attachments.join("; ")}</div>
                   ) : null}
@@ -1610,21 +1616,36 @@ function MarkdownContent({ text, className }: { text: string; className: string 
 function StructuredContentParts({
   parts,
   fallbackText,
+  toolNamesByCallID,
 }: {
   parts: Record<string, unknown>[];
   fallbackText: string;
+  toolNamesByCallID?: Map<string, string>;
 }) {
   return (
     <div className="chat-parts">
       {parts.map((part, index) => (
-        <StructuredContentPart key={index} part={part} index={index} />
+        <StructuredContentPart
+          key={index}
+          part={part}
+          index={index}
+          toolNamesByCallID={toolNamesByCallID}
+        />
       ))}
       {parts.length === 0 && <MarkdownContent text={fallbackText} className="chat-body prose-md" />}
     </div>
   );
 }
 
-function StructuredContentPart({ part, index }: { part: Record<string, unknown>; index: number }) {
+function StructuredContentPart({
+  part,
+  index,
+  toolNamesByCallID,
+}: {
+  part: Record<string, unknown>;
+  index: number;
+  toolNamesByCallID?: Map<string, string>;
+}) {
   const type = stringRecordValue(part.type);
   if (type === "agent_message_meta") {
     return <AgentMessageMetaPart part={part} />;
@@ -1652,11 +1673,44 @@ function StructuredContentPart({ part, index }: { part: Record<string, unknown>;
   if (type === "function_call" || type === "custom_tool_call") {
     return <FunctionCallPart part={part} type={type} />;
   }
+  if (type === "tool_search_call") {
+    return <ToolSearchCallPart part={part} />;
+  }
+  if (type === "tool_search_output") {
+    return <ToolSearchOutputPart part={part} />;
+  }
+  if (type === "tool_declarations") {
+    return <ToolDeclarationsPart part={part} />;
+  }
   if (type === "function_call_output" || type === "custom_tool_call_output") {
-    return <FunctionCallOutputPart part={part} type={type} />;
+    return (
+      <FunctionCallOutputPart
+        part={part}
+        type={type}
+        toolName={resolvedToolName(part, toolNamesByCallID)}
+      />
+    );
   }
   if (type === "tool_result" || type === "mcp_tool_result" || type === "web_search_tool_result") {
-    return <ToolResultPart part={part} type={type} />;
+    return (
+      <ToolResultPart
+        part={part}
+        type={type}
+        toolName={resolvedToolName(part, toolNamesByCallID)}
+      />
+    );
+  }
+  if (isToolCallPartType(type)) {
+    return <ProtocolToolCallPart part={part} type={type} />;
+  }
+  if (isToolResultPartType(type)) {
+    return (
+      <ProtocolToolResultPart
+        part={part}
+        type={type}
+        toolName={resolvedToolName(part, toolNamesByCallID)}
+      />
+    );
   }
   if (type === "input_file" || type === "input_audio" || type === "file" || type === "document") {
     return <FilePart part={part} type={type || "file"} />;
@@ -1728,7 +1782,7 @@ function ImagePart({ part, index }: { part: Record<string, unknown>; index: numb
       {url ? (
         <InlineImageAsset url={url} alt={`image ${index + 1}`} />
       ) : (
-        <JsonValueBlock label="Image" value={part} />
+        <FriendlyRecord value={part} omit={["type"]} />
       )}
     </div>
   );
@@ -1810,7 +1864,7 @@ function ReasoningPart({ part }: { part: Record<string, unknown> }) {
           <span>Encrypted reasoning block</span>
         </div>
       ) : null}
-      {!text && !encrypted ? <JsonValueBlock label="Payload" value={part} /> : null}
+      {!text && !encrypted ? <FriendlyRecord value={part} omit={["type"]} /> : null}
     </div>
   );
 }
@@ -1820,7 +1874,6 @@ function ToolUsePart({ part, index, type }: { part: Record<string, unknown>; ind
   const id = stringRecordValue(part.id) || stringRecordValue(part.tool_use_id) || stringRecordValue(part.call_id);
   const serverName = stringRecordValue(part.server_name);
   const input = part.input ?? {};
-  const questions = askUserQuestions(input);
   return (
     <div className="tool-use-card">
       <div className="tool-use-header">
@@ -1828,14 +1881,11 @@ function ToolUsePart({ part, index, type }: { part: Record<string, unknown>; ind
           <span className="part-type-badge">{type}</span>
           <span className="tool-name">{name}</span>
           {serverName && <span className="part-chip">{serverName}</span>}
+          {stringRecordValue(part.status) && <span className="part-chip">{stringRecordValue(part.status)}</span>}
         </div>
         {id && <span className="tool-id">{id}</span>}
       </div>
-      {questions ? (
-        <AskUserQuestionView questions={questions} />
-      ) : (
-        <JsonValueBlock label="Input" value={input} />
-      )}
+      <ToolInputView toolName={name} value={input} />
     </div>
   );
 }
@@ -1850,30 +1900,145 @@ function FunctionCallPart({ part, type }: { part: Record<string, unknown>; type:
         <div className="tool-use-title">
           <span className="part-type-badge">{type}</span>
           <span className="tool-name">{name}</span>
+          {stringRecordValue(part.status) && <span className="part-chip">{stringRecordValue(part.status)}</span>}
         </div>
         {id && <span className="tool-id">{id}</span>}
       </div>
-      <JsonValueBlock label={type === "custom_tool_call" ? "Input" : "Arguments"} value={input ?? {}} />
+      <ToolInputView toolName={name} value={input ?? {}} />
     </div>
   );
 }
 
-function FunctionCallOutputPart({ part, type }: { part: Record<string, unknown>; type: string }) {
+function ToolSearchCallPart({ part }: { part: Record<string, unknown> }) {
+  const id = stringRecordValue(part.call_id) || stringRecordValue(part.id);
+  return (
+    <div className="tool-use-card">
+      <div className="tool-use-header">
+        <div className="tool-use-title">
+          <span className="part-type-badge">tool search</span>
+          <span className="tool-name">Discover tools</span>
+          {stringRecordValue(part.execution) && <span className="part-chip">{stringRecordValue(part.execution)}</span>}
+          {stringRecordValue(part.status) && <span className="part-chip">{stringRecordValue(part.status)}</span>}
+        </div>
+        {id && <span className="tool-id">{id}</span>}
+      </div>
+      <ToolInputView toolName="tool_search" value={part.arguments ?? {}} />
+    </div>
+  );
+}
+
+function ToolSearchOutputPart({ part }: { part: Record<string, unknown> }) {
+  const id = stringRecordValue(part.call_id) || stringRecordValue(part.id);
+  const summary = summarizeToolDefinitions(Array.isArray(part.tools) ? part.tools : []);
+  return (
+    <div className="tool-result-card">
+      <div className="tool-use-header">
+        <div className="tool-use-title">
+          <span className="part-type-badge">tool search result</span>
+          <span className="tool-name">
+            Loaded {summary.toolCount} tool{summary.toolCount === 1 ? "" : "s"}
+          </span>
+          {summary.namespaceCount > 0 && (
+            <span className="part-chip">
+              {summary.namespaceCount} namespace{summary.namespaceCount === 1 ? "" : "s"}
+            </span>
+          )}
+          {stringRecordValue(part.execution) && <span className="part-chip">{stringRecordValue(part.execution)}</span>}
+          {stringRecordValue(part.status) && <span className="part-chip">{stringRecordValue(part.status)}</span>}
+        </div>
+        {id && <span className="tool-id">{id}</span>}
+      </div>
+      <ToolDefinitionGroups summary={summary} emptyText="No tools were loaded." />
+    </div>
+  );
+}
+
+function ToolDeclarationsPart({ part }: { part: Record<string, unknown> }) {
+  const summary = summarizeToolDefinitions(Array.isArray(part.tools) ? part.tools : []);
+  return (
+    <div className="tool-use-card">
+      <div className="tool-use-header">
+        <div className="tool-use-title">
+          <span className="part-type-badge">available tools</span>
+          <span className="tool-name">
+            {summary.toolCount} tool{summary.toolCount === 1 ? "" : "s"}
+          </span>
+          {summary.namespaceCount > 0 && (
+            <span className="part-chip">
+              {summary.namespaceCount} namespace{summary.namespaceCount === 1 ? "" : "s"}
+            </span>
+          )}
+        </div>
+      </div>
+      <ToolDefinitionGroups summary={summary} emptyText="No tools declared." />
+    </div>
+  );
+}
+
+function ToolDefinitionGroups({
+  summary,
+  emptyText,
+}: {
+  summary: ToolDefinitionSummary;
+  emptyText: string;
+}) {
+  if (summary.groups.length === 0) return <div className="tool-empty">{emptyText}</div>;
+  return (
+    <div className="tool-search-groups">
+      {summary.groups.map((group, index) => (
+        <div className="tool-search-group" key={`${group.name}-${index}`}>
+          <div className="tool-search-group-title">
+            <span>{group.name}</span>
+            <span>{group.tools.length} tool{group.tools.length === 1 ? "" : "s"}</span>
+          </div>
+          {group.description && <div className="tool-search-description">{group.description}</div>}
+          <div className="tool-search-tools">
+            {group.tools.map((tool, toolIndex) => (
+              <div className="tool-search-tool" key={`${tool.name}-${toolIndex}`}>
+                <span className="tool-search-tool-name">{tool.name}</span>
+                {tool.description && <span className="tool-search-tool-description">{tool.description}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function FunctionCallOutputPart({
+  part,
+  type,
+  toolName,
+}: {
+  part: Record<string, unknown>;
+  type: string;
+  toolName?: string;
+}) {
   const id = stringRecordValue(part.call_id) || stringRecordValue(part.id);
   return (
     <div className="tool-result-card">
       <div className="tool-use-header">
         <div className="tool-use-title">
           <span className="part-type-badge">{type}</span>
+          {toolName && <span className="tool-name">{toolName}</span>}
         </div>
         {id && <span className="tool-id">{id}</span>}
       </div>
-      <ToolResultContent value={part.output ?? part.content ?? null} />
+      <ToolResultContent value={part.output ?? part.content ?? null} toolName={toolName} />
     </div>
   );
 }
 
-function ToolResultPart({ part, type }: { part: Record<string, unknown>; type: string }) {
+function ToolResultPart({
+  part,
+  type,
+  toolName,
+}: {
+  part: Record<string, unknown>;
+  type: string;
+  toolName?: string;
+}) {
   const id = stringRecordValue(part.tool_use_id) || stringRecordValue(part.id) || stringRecordValue(part.call_id);
   const serverName = stringRecordValue(part.server_name);
   return (
@@ -1881,19 +2046,71 @@ function ToolResultPart({ part, type }: { part: Record<string, unknown>; type: s
       <div className="tool-use-header">
         <div className="tool-use-title">
           <span className="part-type-badge">{type}</span>
+          {toolName && <span className="tool-name">{toolName}</span>}
           {part.is_error === true && <span className="part-chip part-chip-danger">error</span>}
           {serverName && <span className="part-chip">{serverName}</span>}
         </div>
         {id && <span className="tool-id">{id}</span>}
       </div>
-      <ToolResultContent value={part.content} />
+      <ToolResultContent value={part.content} toolName={toolName} />
     </div>
   );
 }
 
-function ToolResultContent({ value }: { value: unknown }) {
+function ProtocolToolCallPart({ part, type }: { part: Record<string, unknown>; type: string }) {
+  const name = qualifiedPartName(part, friendlyTypeLabel(type.replace(/_call$/, "")));
+  const id = stringRecordValue(part.call_id) || stringRecordValue(part.id);
+  const input = toolCallPayload(part);
+  return (
+    <div className="tool-use-card">
+      <div className="tool-use-header">
+        <div className="tool-use-title">
+          <span className="part-type-badge">{type}</span>
+          <span className="tool-name">{name}</span>
+          {stringRecordValue(part.status) && <span className="part-chip">{stringRecordValue(part.status)}</span>}
+        </div>
+        {id && <span className="tool-id">{id}</span>}
+      </div>
+      <ToolInputView toolName={name} value={input} />
+    </div>
+  );
+}
+
+function ProtocolToolResultPart({
+  part,
+  type,
+  toolName,
+}: {
+  part: Record<string, unknown>;
+  type: string;
+  toolName?: string;
+}) {
+  const id = stringRecordValue(part.call_id) || stringRecordValue(part.tool_use_id) || stringRecordValue(part.id);
+  return (
+    <div className="tool-result-card">
+      <div className="tool-use-header">
+        <div className="tool-use-title">
+          <span className="part-type-badge">{type}</span>
+          {toolName && <span className="tool-name">{toolName}</span>}
+          {part.is_error === true && <span className="part-chip part-chip-danger">error</span>}
+          {stringRecordValue(part.status) && <span className="part-chip">{stringRecordValue(part.status)}</span>}
+        </div>
+        {id && <span className="tool-id">{id}</span>}
+      </div>
+      <ToolResultContent value={toolResultPayload(part)} toolName={toolName} />
+    </div>
+  );
+}
+
+function ToolResultContent({ value, toolName }: { value: unknown; toolName?: string }) {
   if (typeof value === "string") {
-    return <pre className="tool-json-block">{value || "—"}</pre>;
+    const command = parseCommandResult(value);
+    if (command && isCommandToolName(toolName)) {
+      return <CommandResultView result={command} />;
+    }
+    const parsed = parseEmbeddedJSON(value);
+    if (parsed !== value) return <FriendlyValue value={parsed} />;
+    return <pre className="tool-text-block">{value || "—"}</pre>;
   }
   if (Array.isArray(value)) {
     const objectParts = value.filter(isRecord);
@@ -1901,7 +2118,167 @@ function ToolResultContent({ value }: { value: unknown }) {
       return <StructuredContentParts parts={objectParts} fallbackText="" />;
     }
   }
-  return <JsonValueBlock label="Content" value={value ?? null} />;
+  return <FriendlyValue value={value ?? null} />;
+}
+
+function ToolInputView({ toolName, value }: { toolName: string; value: unknown }) {
+  const parsed = parseEmbeddedJSON(value);
+  const questions = askUserQuestions(parsed);
+  if (questions) return <AskUserQuestionView questions={questions} />;
+
+  const plan = planInput(parsed);
+  if (plan && bareToolName(toolName) === "update_plan") {
+    return <PlanInputView explanation={plan.explanation} steps={plan.steps} />;
+  }
+
+  const command = toolCommandInput(toolName, parsed);
+  if (command) {
+    return (
+      <div className="tool-command-view">
+        <div className="tool-command-heading">
+          <span>{command.label}</span>
+          {command.meta.length > 0 && (
+            <div className="part-meta">
+              {command.meta.map((item) => <span className="part-chip" key={item}>{item}</span>)}
+            </div>
+          )}
+        </div>
+        <pre className={clsx("tool-command-block", command.language && `language-${command.language}`)}>
+          {command.text || "(empty)"}
+        </pre>
+        {Object.keys(command.remaining).length > 0 && (
+          <FriendlyRecord value={command.remaining} />
+        )}
+      </div>
+    );
+  }
+
+  return <FriendlyValue value={parsed} />;
+}
+
+interface PlanStepView {
+  step: string;
+  status: string;
+}
+
+function PlanInputView({ explanation, steps }: { explanation: string; steps: PlanStepView[] }) {
+  return (
+    <div className="tool-plan-view">
+      {explanation && <div className="tool-plan-explanation">{explanation}</div>}
+      <div className="tool-plan-steps">
+        {steps.map((step, index) => (
+          <div className="tool-plan-step" key={`${step.step}-${index}`}>
+            <span className={clsx("tool-plan-status", `tool-plan-status-${normalizeStatus(step.status)}`)}>
+              {step.status || "pending"}
+            </span>
+            <span>{step.step || `Step ${index + 1}`}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+interface ParsedCommandResult {
+  status: "completed" | "running";
+  exitCode?: number;
+  wallTime?: string;
+  originalTokens?: number;
+  chunkID?: string;
+  cellID?: string;
+  truncated: boolean;
+  output: string;
+}
+
+function CommandResultView({ result }: { result: ParsedCommandResult }) {
+  return (
+    <div className="tool-result-view">
+      <div className="part-meta">
+        <span className={clsx("part-chip", result.exitCode != null && result.exitCode !== 0 && "part-chip-danger")}>
+          {result.status === "running"
+            ? "running"
+            : result.exitCode == null
+              ? "completed"
+              : `exit ${result.exitCode}`}
+        </span>
+        {result.wallTime && <span className="part-chip">{result.wallTime}</span>}
+        {result.originalTokens != null && <span className="part-chip">{formatNumber(result.originalTokens)} tokens</span>}
+        {result.truncated && <span className="part-chip part-chip-danger">truncated</span>}
+        {result.chunkID && <span className="part-chip">chunk {result.chunkID}</span>}
+        {result.cellID && <span className="part-chip">cell {result.cellID}</span>}
+      </div>
+      <pre className="tool-text-block">{result.output || "(no output)"}</pre>
+    </div>
+  );
+}
+
+function FriendlyValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
+  const parsed = depth === 0 ? parseEmbeddedJSON(value) : value;
+  if (parsed == null) return <span className="tool-empty">—</span>;
+  if (typeof parsed === "boolean") {
+    return <span className={clsx("part-chip", parsed ? "part-chip-positive" : "")}>{String(parsed)}</span>;
+  }
+  if (typeof parsed === "number" || typeof parsed === "bigint") {
+    return <span className="tool-inline-value">{String(parsed)}</span>;
+  }
+  if (typeof parsed === "string") {
+    if (looksLikePatch(parsed)) return <pre className="tool-command-block language-patch">{parsed}</pre>;
+    if (parsed.includes("\n") || parsed.length > 120) return <pre className="tool-text-block">{parsed}</pre>;
+    return <span className="tool-inline-value">{parsed || "(empty)"}</span>;
+  }
+  if (Array.isArray(parsed)) {
+    if (parsed.length === 0) return <span className="tool-empty">(empty list)</span>;
+    if (depth >= 4) return <span className="part-chip">{parsed.length} items</span>;
+    const primitives = parsed.every((item) => item == null || ["string", "number", "boolean"].includes(typeof item));
+    if (primitives) {
+      return (
+        <div className="tool-value-chips">
+          {parsed.map((item, index) => <span className="part-chip" key={index}>{String(item ?? "null")}</span>)}
+        </div>
+      );
+    }
+    return (
+      <div className="tool-value-list">
+        {parsed.map((item, index) => (
+          <div className="tool-value-list-item" key={index}>
+            <span className="tool-value-index">{index + 1}</span>
+            <FriendlyValue value={item} depth={depth + 1} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (isRecord(parsed)) {
+    if (depth >= 4) return <span className="part-chip">{Object.keys(parsed).length} fields</span>;
+    return <FriendlyRecord value={parsed} depth={depth} />;
+  }
+  return <span className="tool-inline-value">{String(parsed)}</span>;
+}
+
+function FriendlyRecord({
+  value,
+  depth = 0,
+  omit = [],
+}: {
+  value: Record<string, unknown>;
+  depth?: number;
+  omit?: string[];
+}) {
+  const omitted = new Set(omit);
+  const entries = Object.entries(value)
+    .filter(([key, field]) => !omitted.has(key) && field !== undefined)
+    .sort(([a], [b]) => friendlyFieldRank(a) - friendlyFieldRank(b));
+  if (entries.length === 0) return <span className="tool-empty">(no fields)</span>;
+  return (
+    <dl className="tool-field-grid">
+      {entries.map(([key, field]) => (
+        <div className="tool-field-row" key={key}>
+          <dt className="tool-field-label">{friendlyTypeLabel(key)}</dt>
+          <dd className="tool-field-value"><FriendlyValue value={field} depth={depth + 1} /></dd>
+        </div>
+      ))}
+    </dl>
+  );
 }
 
 function FilePart({ part, type }: { part: Record<string, unknown>; type: string }) {
@@ -1967,7 +2344,7 @@ function FilePart({ part, type }: { part: Record<string, unknown>; type: string 
       {previewVisible && url && (
         <iframe className="chat-document-preview" src={url} title={`${title} preview`} loading="lazy" />
       )}
-      <JsonValueBlock label="Details" value={filePartSummary(part)} />
+      <FriendlyRecord value={filePartSummary(part)} />
     </div>
   );
 }
@@ -1995,10 +2372,10 @@ function ImageGenerationPart({ part }: { part: Record<string, unknown> }) {
       {stringRecordValue(part.revised_prompt) && (
         <div className="tool-json-wrap">
           <div className="tool-json-label">Revised prompt</div>
-          <div className="tool-json-block">{stringRecordValue(part.revised_prompt)}</div>
+          <div className="tool-text-block">{stringRecordValue(part.revised_prompt)}</div>
         </div>
       )}
-      {!url && <JsonValueBlock label="Payload" value={part} />}
+      {!url && <FriendlyRecord value={part} omit={["type", "id", "status"]} />}
     </div>
   );
 }
@@ -2022,7 +2399,9 @@ function WebSearchCallPart({ part }: { part: Record<string, unknown> }) {
         {stringRecordValue(action?.url) && <span className="part-chip">url</span>}
         {sources > 0 && <span className="part-chip">{sources} sources</span>}
       </div>
-      {action ? <JsonValueBlock label="Action" value={action} /> : <JsonValueBlock label="Payload" value={part} />}
+      {action
+        ? <FriendlyRecord value={action} omit={["type"]} />
+        : <FriendlyRecord value={part} omit={["type", "id", "status"]} />}
     </div>
   );
 }
@@ -2071,26 +2450,27 @@ function GenericPart({ part, type }: { part: Record<string, unknown>; type: stri
   return (
     <div className="generic-part">
       <div className="part-header">
-        <span className="part-type-badge">{type}</span>
+        <div className="tool-use-title">
+          <span className="part-type-badge">{type}</span>
+          {stringRecordValue(part.name) && <span className="tool-name">{stringRecordValue(part.name)}</span>}
+          {stringRecordValue(part.status) && <span className="part-chip">{stringRecordValue(part.status)}</span>}
+        </div>
+        {stringRecordValue(part.id ?? part.call_id) && (
+          <span className="tool-id">{stringRecordValue(part.id ?? part.call_id)}</span>
+        )}
       </div>
-      <JsonValueBlock label="Payload" value={part} />
-    </div>
-  );
-}
-
-function JsonValueBlock({ label, value }: { label: string; value: unknown }) {
-  return (
-    <div className="tool-json-wrap">
-      <div className="tool-json-label">{label}</div>
-      <pre className="tool-json-block">{rawValueText(value)}</pre>
+      <FriendlyRecord value={part} omit={["type", "name", "id", "call_id", "status"]} />
     </div>
   );
 }
 
 function visualContentParts(turn: Turn): Record<string, unknown>[] | null {
+  if (Array.isArray(turn.raw) && turn.role.toLowerCase() === "tool") {
+    return [{ type: "tool_declarations", tools: turn.raw }];
+  }
   const raw = isRecord(turn.raw) ? turn.raw : null;
   const rawType = stringRecordValue(raw?.type);
-  if (raw && isStandaloneVisualPart(rawType)) return [raw];
+  if (raw && rawType && rawType !== "message" && rawType !== "agent_message") return [raw];
 
   const content = raw?.content;
   const output = raw?.output;
@@ -2119,21 +2499,7 @@ function responsesOutputVisualParts(item: unknown): Record<string, unknown>[] {
   if (type === "message" && Array.isArray(item.content)) {
     return item.content.filter(isRecord);
   }
-  return isStandaloneVisualPart(type) ? [item] : [];
-}
-
-function isStandaloneVisualPart(type: string): boolean {
-  return (
-    isImageVisualPart(type) ||
-    isFileVisualPart(type) ||
-    type === "function_call" ||
-    type === "custom_tool_call" ||
-    type === "function_call_output" ||
-    type === "custom_tool_call_output" ||
-    type === "image_generation_call" ||
-    type === "web_search_call" ||
-    type === "reasoning"
-  );
+  return type ? [item] : [];
 }
 
 function isPlainTextPart(part: Record<string, unknown>): boolean {
@@ -2292,6 +2658,485 @@ function isSafeAssetURL(value: string): boolean {
   }
 }
 
+interface ToolDefinitionView {
+  name: string;
+  description: string;
+}
+
+interface ToolDefinitionGroupView {
+  name: string;
+  description: string;
+  tools: ToolDefinitionView[];
+}
+
+interface ToolDefinitionSummary {
+  namespaceCount: number;
+  toolCount: number;
+  groups: ToolDefinitionGroupView[];
+}
+
+function summarizeToolDefinitions(rawTools: unknown[]): ToolDefinitionSummary {
+  let namespaceCount = 0;
+  let toolCount = 0;
+  const groups: ToolDefinitionGroupView[] = [];
+  const ungrouped: ToolDefinitionView[] = [];
+
+  rawTools.forEach((raw, index) => {
+    if (!isRecord(raw)) return;
+    const type = stringRecordValue(raw.type);
+    const name = toolDefinitionName(raw, index);
+    if (type === "namespace") {
+      namespaceCount += 1;
+      const tools = Array.isArray(raw.tools)
+        ? raw.tools.filter(isRecord).map((tool, toolIndex) => ({
+            name: toolDefinitionName(tool, toolIndex),
+            description: compactDescription(tool.description),
+          }))
+        : [];
+      toolCount += tools.length;
+      groups.push({
+        name,
+        description: compactDescription(raw.description),
+        tools,
+      });
+      return;
+    }
+    toolCount += 1;
+    ungrouped.push({ name, description: compactDescription(raw.description) });
+  });
+
+  if (ungrouped.length > 0) {
+    groups.push({ name: "Tools", description: "", tools: ungrouped });
+  }
+  return { namespaceCount, toolCount, groups };
+}
+
+function toolDefinitionName(tool: Record<string, unknown>, index: number): string {
+  return (
+    stringRecordValue(tool.name) ||
+    stringRecordValue(tool.server_label) ||
+    stringRecordValue(tool.type) ||
+    `tool ${index + 1}`
+  );
+}
+
+function compactDescription(value: unknown, max = 220): string {
+  const text = stringRecordValue(value).replace(/\s+/g, " ").trim();
+  return text.length > max ? `${text.slice(0, max - 3)}...` : text;
+}
+
+function parseEmbeddedJSON(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!trimmed || (!trimmed.startsWith("{") && !trimmed.startsWith("["))) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+}
+
+function bareToolName(name: string): string {
+  const normalized = name.trim().toLowerCase();
+  return normalized.split(/[.:/]/).filter(Boolean).pop() || normalized;
+}
+
+function isCommandToolName(name?: string): boolean {
+  if (!name) return false;
+  const bare = bareToolName(name);
+  return /^(?:exec_command|execute_command|run_command|shell|bash|terminal|write_stdin|js)$/.test(bare);
+}
+
+interface ToolCommandView {
+  label: string;
+  language: string;
+  text: string;
+  meta: string[];
+  remaining: Record<string, unknown>;
+}
+
+function toolCommandInput(toolName: string, value: unknown): ToolCommandView | null {
+  const bare = bareToolName(toolName);
+  if (typeof value === "string") {
+    if (looksLikePatch(value) || bare === "apply_patch") {
+      return {
+        label: "Patch",
+        language: "patch",
+        text: value,
+        meta: patchMeta(value),
+        remaining: {},
+      };
+    }
+    if (isCommandToolName(toolName)) {
+      return { label: bare === "js" ? "JavaScript" : "Command", language: bare === "js" ? "javascript" : "shell", text: value, meta: [], remaining: {} };
+    }
+    return null;
+  }
+  if (!isRecord(value)) return null;
+
+  let key = "";
+  let label = "Command";
+  let language = "shell";
+  if (typeof value.patch === "string") {
+    key = "patch";
+    label = "Patch";
+    language = "patch";
+  } else if (typeof value.cmd === "string") {
+    key = "cmd";
+  } else if (typeof value.command === "string" || Array.isArray(value.command)) {
+    key = "command";
+  } else if (Array.isArray(value.commands)) {
+    key = "commands";
+  } else if (typeof value.script === "string") {
+    key = "script";
+  } else if (typeof value.code === "string" && (bare === "js" || bare.includes("repl"))) {
+    key = "code";
+    label = "JavaScript";
+    language = "javascript";
+  } else if (typeof value.chars === "string" && bare === "write_stdin" && value.chars) {
+    key = "chars";
+    label = "Input";
+    language = "";
+  }
+  if (!key) return null;
+
+  const raw = value[key];
+  const text = Array.isArray(raw) ? raw.map((item) => String(item)).join("\n") : String(raw ?? "");
+  const remaining = { ...value };
+  delete remaining[key];
+  const meta: string[] = language === "patch" ? patchMeta(text) : [];
+  for (const metaKey of [
+    "workdir",
+    "cwd",
+    "timeout_ms",
+    "yield_time_ms",
+    "max_output_tokens",
+    "session_id",
+    "cell_id",
+    "tty",
+    "sandbox_permissions",
+  ]) {
+    if (remaining[metaKey] == null || remaining[metaKey] === "") continue;
+    meta.push(toolMetaLabel(metaKey, remaining[metaKey]));
+    delete remaining[metaKey];
+  }
+  return { label, language, text, meta, remaining };
+}
+
+function toolMetaLabel(key: string, value: unknown): string {
+  if ((key === "timeout_ms" || key === "yield_time_ms") && typeof value === "number") {
+    return `${friendlyTypeLabel(key)}: ${formatMilliseconds(value)}`;
+  }
+  if (key === "max_output_tokens" && typeof value === "number") {
+    return `output: ${formatNumber(value)} tokens`;
+  }
+  if (key === "session_id") return `session: ${String(value)}`;
+  if (key === "cell_id") return `cell: ${String(value)}`;
+  return `${friendlyTypeLabel(key)}: ${String(value)}`;
+}
+
+function formatMilliseconds(value: number): string {
+  if (value < 1000) return `${value} ms`;
+  const seconds = value / 1000;
+  return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)} s`;
+}
+
+function looksLikePatch(value: string): boolean {
+  return value.trimStart().startsWith("*** Begin Patch") || /^diff --git /m.test(value);
+}
+
+function patchMeta(value: string): string[] {
+  const files = value.match(/^\*\*\* (?:Add|Update|Delete) File:/gm)?.length
+    ?? value.match(/^diff --git /gm)?.length
+    ?? 0;
+  const additions = value.split(/\r?\n/).filter((line) => /^\+(?!\+\+)/.test(line)).length;
+  const deletions = value.split(/\r?\n/).filter((line) => /^-(?!--)/.test(line)).length;
+  return [
+    files ? `${files} file${files === 1 ? "" : "s"}` : "",
+    additions ? `+${additions}` : "",
+    deletions ? `-${deletions}` : "",
+  ].filter(Boolean);
+}
+
+function planInput(value: unknown): { explanation: string; steps: PlanStepView[] } | null {
+  if (!isRecord(value) || !Array.isArray(value.plan)) return null;
+  const steps = value.plan.filter(isRecord).map((step) => ({
+    step: stringRecordValue(step.step),
+    status: stringRecordValue(step.status) || "pending",
+  }));
+  return {
+    explanation: stringRecordValue(value.explanation),
+    steps,
+  };
+}
+
+function normalizeStatus(status: string): string {
+  return status.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "pending";
+}
+
+function parseCommandResult(value: string): ParsedCommandResult | null {
+  const lines = value.replace(/\r\n/g, "\n").split("\n");
+  const outputMarker = lines.findIndex((line) => line.trim() === "Output:");
+  const header = outputMarker >= 0 ? lines.slice(0, outputMarker) : lines;
+  let recognized = false;
+  let status: ParsedCommandResult["status"] = "completed";
+  let exitCode: number | undefined;
+  let wallTime: string | undefined;
+  let originalTokens: number | undefined;
+  let chunkID: string | undefined;
+  let cellID: string | undefined;
+  let lastMetaIndex = -1;
+
+  for (const [index, line] of header.entries()) {
+    let match = /^Chunk ID:\s*(.+)$/.exec(line);
+    if (match) { chunkID = match[1].trim(); recognized = true; lastMetaIndex = index; continue; }
+    match = /^Wall time:\s*(.+)$/.exec(line);
+    if (match) { wallTime = match[1].trim(); recognized = true; lastMetaIndex = index; continue; }
+    match = /^Process exited with code\s+(-?\d+)$/.exec(line);
+    if (match) { exitCode = Number(match[1]); recognized = true; lastMetaIndex = index; continue; }
+    match = /^Original token count:\s*(\d+)$/.exec(line);
+    if (match) { originalTokens = Number(match[1]); recognized = true; lastMetaIndex = index; continue; }
+    match = /^Script running with cell ID\s+(.+)$/.exec(line);
+    if (match) { cellID = match[1].trim(); status = "running"; recognized = true; lastMetaIndex = index; continue; }
+    if (line.trim() === "Script completed") { recognized = true; lastMetaIndex = index; }
+  }
+  if (!recognized) return null;
+
+  const truncated = /Warning: truncated output|Total output lines:/i.test(value);
+  const outputLines = outputMarker >= 0
+    ? lines.slice(outputMarker + 1)
+    : lines.slice(lastMetaIndex + 1);
+  while (
+    outputLines.length > 0 &&
+    (!outputLines[0].trim() || /^Warning: truncated output|^Total output lines:/i.test(outputLines[0]))
+  ) {
+    outputLines.shift();
+  }
+  const output = outputLines.join("\n").trimEnd();
+  return {
+    status,
+    exitCode,
+    wallTime,
+    originalTokens,
+    chunkID,
+    cellID,
+    truncated,
+    output,
+  };
+}
+
+function toolCallPayload(part: Record<string, unknown>): unknown {
+  if (part.input !== undefined) return part.input;
+  if (part.arguments !== undefined) return part.arguments;
+  if (part.action !== undefined) return part.action;
+  const payload = { ...part };
+  for (const key of ["type", "id", "call_id", "status", "name", "namespace", "server_name"]) delete payload[key];
+  return payload;
+}
+
+function toolResultPayload(part: Record<string, unknown>): unknown {
+  if (part.output !== undefined) return part.output;
+  if (part.result !== undefined) return part.result;
+  if (part.content !== undefined) return part.content;
+  const payload = { ...part };
+  for (const key of ["type", "id", "call_id", "tool_use_id", "status", "name", "namespace", "is_error"]) delete payload[key];
+  return payload;
+}
+
+function isToolCallPartType(type: string): boolean {
+  return (
+    type === "tool_use" ||
+    type === "mcp_tool_use" ||
+    type === "server_tool_use" ||
+    type.endsWith("_tool_use") ||
+    type.endsWith("_call")
+  );
+}
+
+function isToolResultPartType(type: string): boolean {
+  return (
+    type === "tool_result" ||
+    type.endsWith("_tool_result") ||
+    type.endsWith("_call_output")
+  );
+}
+
+function friendlyTypeLabel(value: string): string {
+  const known: Record<string, string> = {
+    workdir: "workdir",
+    cwd: "cwd",
+    timeout_ms: "timeout",
+    yield_time_ms: "yield",
+    max_output_tokens: "output limit",
+    sandbox_permissions: "sandbox",
+    call_id: "call id",
+    tool_use_id: "tool use id",
+  };
+  if (known[value]) return known[value];
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .replace(/\bms\b/gi, "ms")
+    .trim();
+}
+
+function friendlyFieldRank(key: string): number {
+  const order = [
+    "query", "goal", "path", "paths", "url", "method", "command", "cmd", "code", "input",
+    "workdir", "cwd", "status", "execution", "limit", "timeout_ms", "yield_time_ms",
+  ];
+  const index = order.indexOf(key);
+  return index >= 0 ? index : order.length;
+}
+
+function collectToolCallNames(turns: Turn[]): Map<string, string> {
+  const names = new Map<string, string>();
+  const visit = (value: unknown, depth = 0) => {
+    if (depth > 8) return;
+    if (Array.isArray(value)) {
+      value.forEach((item) => visit(item, depth + 1));
+      return;
+    }
+    if (!isRecord(value)) return;
+    const type = stringRecordValue(value.type);
+    if (isToolCallPartType(type)) {
+      const id = stringRecordValue(value.call_id) || stringRecordValue(value.id) || stringRecordValue(value.tool_use_id);
+      if (id) names.set(id, toolPartName(value, type));
+    }
+    visit(value.content, depth + 1);
+    visit(value.output, depth + 1);
+  };
+  turns.forEach((turn) => visit(turn.raw));
+  return names;
+}
+
+function toolPartName(part: Record<string, unknown>, type: string): string {
+  if (type === "tool_search_call") return "tool search";
+  const fallback = friendlyTypeLabel(type.replace(/(?:_call|_tool_use)$/, "")) || "tool";
+  return qualifiedPartName(part, fallback);
+}
+
+function resolvedToolName(part: Record<string, unknown>, names?: Map<string, string>): string | undefined {
+  const direct = stringRecordValue(part.name);
+  if (direct) return qualifiedPartName(part, direct);
+  const id = stringRecordValue(part.call_id) || stringRecordValue(part.tool_use_id) || stringRecordValue(part.id);
+  return id ? names?.get(id) : undefined;
+}
+
+function toolPartsFromTurn(turn: Turn): Record<string, unknown>[] {
+  if (Array.isArray(turn.raw) && turn.role.toLowerCase() === "tool") {
+    return [{ type: "tool_declarations", tools: turn.raw }];
+  }
+  const raw = isRecord(turn.raw) ? turn.raw : null;
+  if (!raw) return [];
+  const type = stringRecordValue(raw.type);
+  if (isToolCallPartType(type) || isToolResultPartType(type) || type === "tool_search_output" || type === "tool_declarations") {
+    return [raw];
+  }
+  const candidates = [raw.content, raw.output];
+  for (const candidate of candidates) {
+    if (!Array.isArray(candidate)) continue;
+    const parts = candidate.filter(isRecord).filter((part) => {
+      const partType = stringRecordValue(part.type);
+      return isToolCallPartType(partType) || isToolResultPartType(partType) || partType === "tool_search_output";
+    });
+    if (parts.length > 0) return parts;
+  }
+  return [];
+}
+
+function toolTurnRoleLabel(turn: Turn): string {
+  const first = toolPartsFromTurn(turn)[0];
+  const type = stringRecordValue(first?.type);
+  if (type === "tool_declarations") return "tools";
+  if (type === "tool_search_output" || isToolResultPartType(type)) return "tool result";
+  if (type) return "tool call";
+  return "tool";
+}
+
+function isRightAlignedTurn(turn: Turn): boolean {
+  if (turn.role.toLowerCase() === "user") return true;
+  if (turn.role.toLowerCase() === "assistant") return false;
+  const type = stringRecordValue(toolPartsFromTurn(turn)[0]?.type);
+  return type === "tool_search_output" || isToolResultPartType(type);
+}
+
+function toolTurnPreview(turn: Turn, names: Map<string, string>): string {
+  const parts = toolPartsFromTurn(turn);
+  const part = parts[0];
+  if (!part) return "";
+  const type = stringRecordValue(part.type);
+  let preview = "";
+  if (type === "tool_declarations") {
+    const summary = summarizeToolDefinitions(Array.isArray(part.tools) ? part.tools : []);
+    preview = `Available tools · ${summary.toolCount} tools${summary.namespaceCount ? ` · ${summary.namespaceCount} namespaces` : ""}`;
+  } else if (type === "tool_search_call") {
+    const args = parseEmbeddedJSON(part.arguments);
+    const record = isRecord(args) ? args : null;
+    const query = stringRecordValue(record?.query ?? record?.goal);
+    const paths = Array.isArray(record?.paths) ? record.paths.map(String).join(", ") : "";
+    const target = query || paths || summarizeInput(args);
+    const limit = typeof record?.limit === "number" ? ` · limit ${record.limit}` : "";
+    preview = `Search tools${target ? ` · ${target}` : ""}${limit}`;
+  } else if (type === "tool_search_output") {
+    const summary = summarizeToolDefinitions(Array.isArray(part.tools) ? part.tools : []);
+    preview = `Loaded ${summary.toolCount} tools${summary.namespaceCount ? ` from ${summary.namespaceCount} namespaces` : ""}`;
+  } else if (isToolCallPartType(type)) {
+    const name = toolPartName(part, type);
+    const input = parseEmbeddedJSON(toolCallPayload(part));
+    const plan = planInput(input);
+    const command = toolCommandInput(name, input);
+    if (plan && bareToolName(name) === "update_plan") {
+      const active = plan.steps.find((step) => step.status === "in_progress");
+      preview = `Update plan · ${plan.steps.length} steps${active ? ` · ${active.step}` : ""}`;
+    } else if (command) {
+      const firstLine = command.text.split(/\r?\n/).find((line) => line.trim())?.trim() || "(empty)";
+      const meta = command.language === "patch" ? command.meta.join(" · ") : "";
+      preview = command.language === "patch"
+        ? `${name}${meta ? ` · ${meta}` : " · patch"}`
+        : `${name} · ${truncatePreview(firstLine, 120)}`;
+    } else {
+      const summary = summarizeInput(input);
+      preview = `${name}${summary ? ` · ${summary}` : ""}`;
+    }
+  } else if (isToolResultPartType(type)) {
+    const name = resolvedToolName(part, names) || "Tool result";
+    const value = toolResultPayload(part);
+    if (typeof value === "string") {
+      const command = parseCommandResult(value);
+      if (command) {
+        const status = command.status === "running" ? "running" : command.exitCode == null ? "completed" : `exit ${command.exitCode}`;
+        const firstLine = command.output.split(/\r?\n/).find((line) => line.trim())?.trim();
+        preview = `${name} · ${status}${command.wallTime ? ` · ${command.wallTime}` : ""}${firstLine ? ` · ${truncatePreview(firstLine, 90)}` : ""}`;
+      } else {
+        preview = `${name} · ${truncatePreview(value.replace(/\s+/g, " ").trim() || "(empty)", 120)}`;
+      }
+    } else {
+      preview = `${name} · ${summarizeInput(value) || "completed"}`;
+    }
+  }
+  if (parts.length > 1) preview += ` · +${parts.length - 1} more`;
+  return preview;
+}
+
+function summarizeInput(value: unknown): string {
+  const parsed = parseEmbeddedJSON(value);
+  if (parsed == null) return "";
+  if (typeof parsed === "string") return truncatePreview(parsed.replace(/\s+/g, " ").trim(), 110);
+  if (Array.isArray(parsed)) return `${parsed.length} item${parsed.length === 1 ? "" : "s"}`;
+  if (!isRecord(parsed)) return String(parsed);
+  const entries = Object.entries(parsed).filter(([, field]) => field != null).slice(0, 3);
+  return entries.map(([key, field]) => {
+    if (Array.isArray(field)) return `${friendlyTypeLabel(key)}: ${field.length} items`;
+    if (isRecord(field)) return `${friendlyTypeLabel(key)}: ${Object.keys(field).length} fields`;
+    return `${friendlyTypeLabel(key)}: ${truncatePreview(String(field), 60)}`;
+  }).join(" · ");
+}
+
+function truncatePreview(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max - 3)}...` : value;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -2356,6 +3201,27 @@ async function copyToClipboard(text: string): Promise<boolean> {
 
 function isToolTurn(turn: Turn): boolean {
   if (turn.role.toLowerCase() === "tool") return true;
+  const raw = isRecord(turn.raw) ? turn.raw : null;
+  const rawType = stringRecordValue(raw?.type);
+  if (
+    raw &&
+    (isToolCallPartType(rawType) ||
+      isToolResultPartType(rawType) ||
+      rawType === "tool_search_output" ||
+      rawType === "tool_declarations")
+  ) {
+    return true;
+  }
+  const content = Array.isArray(raw?.content) ? raw.content.filter(isRecord) : [];
+  if (
+    content.length > 0 &&
+    content.every((part) => {
+      const type = stringRecordValue(part.type);
+      return isToolCallPartType(type) || isToolResultPartType(type) || type === "tool_search_output";
+    })
+  ) {
+    return true;
+  }
   const text = turnText(turn).trimStart();
   if (startsWithCollapsibleBlock(text)) return true;
   const hiddenThinking = /^\*\*Thinking\*\*\s+_\((?:reasoning|thinking|redacted_thinking)\)_\s+(?:---\s+)?/s.exec(text);
@@ -2392,7 +3258,10 @@ function startsWithToolBlock(text: string): boolean {
     text.startsWith("**[tool_use ") ||
     text.startsWith("**[tool_result") ||
     text.startsWith("**[function_call ") ||
-    text.startsWith("**[custom_tool_call ")
+    text.startsWith("**[custom_tool_call ") ||
+    text.startsWith("**[tool_search_call") ||
+    text.startsWith("**[tool_search_output") ||
+    /^\*\*\[[a-z0-9_]+_call(?:_output)?(?:\s|\])/.test(text)
   );
 }
 
@@ -2400,7 +3269,9 @@ function startsWithWebSearchCallBlock(text: string): boolean {
   return text.startsWith("**[web_search_call ");
 }
 
-function chatPreview(turn: Turn): string {
+function chatPreview(turn: Turn, toolNamesByCallID: Map<string, string>): string {
+  const toolPreview = toolTurnPreview(turn, toolNamesByCallID);
+  if (toolPreview) return truncatePreview(toolPreview, 180);
   const text = turnText(turn).replace(/[`*#>\[\]()]/g, "").replace(/\s+/g, " ").trim();
   if (!text) return "(empty)";
   return text.length > 160 ? text.slice(0, 160) + "..." : text;

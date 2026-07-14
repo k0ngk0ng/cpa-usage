@@ -239,7 +239,6 @@ function toolDeclarationsMarkdown(tools: unknown[]): string {
   return [
     `**[tools ${tools.length}]**`,
     summary,
-    codeFence(JSON.stringify(tools, null, 2), "json"),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -556,6 +555,20 @@ function responsesInputToTurn(raw: unknown): Turn | null {
       raw: m,
     };
   }
+  if (type === "tool_search_call") {
+    return {
+      role: "assistant",
+      text: toolSearchCallMarkdown(m),
+      raw: m,
+    };
+  }
+  if (type === "tool_search_output") {
+    return {
+      role: "user",
+      text: toolSearchOutputMarkdown(m),
+      raw: m,
+    };
+  }
   if (type === "function_call_output" || type === "custom_tool_call_output") {
     const out = toolResultContentToMarkdown(m.output, "tool result image");
     return {
@@ -656,6 +669,88 @@ function webSearchCallMarkdown(item: Record<string, unknown>): string {
     .join("\n\n");
 }
 
+function toolSearchCallMarkdown(item: Record<string, unknown>): string {
+  const args = objectValue(item.arguments);
+  const lines = toolItemMetaLines(item);
+  const query = stringValue(args?.query ?? args?.goal);
+  if (query) lines.push(`- query: ${query}`);
+
+  const paths = Array.isArray(args?.paths)
+    ? args.paths.map(stringValue).filter(Boolean)
+    : [];
+  if (paths.length > 0) lines.push(`- paths: ${paths.join(", ")}`);
+
+  const limit = numberValue(args?.limit);
+  if (limit != null) lines.push(`- limit: ${limit}`);
+
+  return [`**[tool_search_call${callIDSuffix(item.call_id)}]**`, lines.join("\n")]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function toolSearchOutputMarkdown(item: Record<string, unknown>): string {
+  const tools = Array.isArray(item.tools) ? item.tools : [];
+  const summary = summarizeLoadedTools(tools);
+  const lines = toolItemMetaLines(item);
+  lines.push(`- loaded: ${summary.toolCount} tool${summary.toolCount === 1 ? "" : "s"}`);
+  if (summary.namespaceCount > 0) {
+    lines.push(`- namespaces: ${summary.namespaceCount}`);
+  }
+  for (const group of summary.groups) {
+    lines.push(`- ${group.label}: ${group.tools.join(", ") || "(empty)"}`);
+  }
+  return [`**[tool_search_output${callIDSuffix(item.call_id)}]**`, lines.join("\n")]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function toolItemMetaLines(item: Record<string, unknown>): string[] {
+  const lines: string[] = [];
+  const status = stringValue(item.status);
+  const execution = stringValue(item.execution);
+  if (status) lines.push(`- status: ${status}`);
+  if (execution) lines.push(`- execution: ${execution}`);
+  return lines;
+}
+
+interface LoadedToolSummary {
+  namespaceCount: number;
+  toolCount: number;
+  groups: Array<{ label: string; tools: string[] }>;
+}
+
+function summarizeLoadedTools(tools: unknown[]): LoadedToolSummary {
+  let namespaceCount = 0;
+  let toolCount = 0;
+  const groups: LoadedToolSummary["groups"] = [];
+
+  tools.forEach((raw, index) => {
+    const tool = objectValue(raw);
+    if (!tool) return;
+    const type = stringValue(tool.type);
+    const name = stringValue(tool.name) || `${type || "tool"} ${index + 1}`;
+    if (type === "namespace") {
+      namespaceCount += 1;
+      const nested = Array.isArray(tool.tools) ? tool.tools : [];
+      const names = nested
+        .map((child, childIndex) => {
+          const definition = objectValue(child);
+          return definition
+            ? stringValue(definition.name) || stringValue(definition.type) || `tool ${childIndex + 1}`
+            : `tool ${childIndex + 1}`;
+        })
+        .filter(Boolean);
+      toolCount += names.length;
+      groups.push({ label: name, tools: names });
+      return;
+    }
+    toolCount += 1;
+    groups.push({ label: type || "tool", tools: [name] });
+  });
+
+  return { namespaceCount, toolCount, groups };
+}
+
 function objectValue(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -669,10 +764,16 @@ function isKnownResponsesOutputType(type: string): boolean {
     type === "custom_tool_call" ||
     type === "function_call_output" ||
     type === "custom_tool_call_output" ||
+    type === "tool_search_call" ||
+    type === "tool_search_output" ||
     type === "image_generation_call" ||
     type === "web_search_call" ||
     type === "reasoning"
   );
+}
+
+function numberValue(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function toolUseMarkdown(name: string, rawCallID: unknown, input: string, language = ""): string {
@@ -988,6 +1089,10 @@ export function extractResponseStream(text: string): StreamExtraction {
           mimeType: stringValue(item.mime_type ?? item.media_type) || existingImage?.mimeType,
           outputFormat: stringValue(item.output_format) || existingImage?.outputFormat,
         });
+      } else if (itemType === "tool_search_call") {
+        appendResponseMarkdown(out, toolSearchCallMarkdown(item));
+      } else if (itemType === "tool_search_output") {
+        appendResponseMarkdown(out, toolSearchOutputMarkdown(item));
       } else if (itemType === "web_search_call") {
         appendResponseMarkdown(out, webSearchCallMarkdown(item));
       } else if (itemType && !isKnownResponsesOutputType(itemType)) {
@@ -1347,6 +1452,16 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
         const output = typeof it.output === "string" ? it.output : JSON.stringify(it.output ?? "", null, 2);
         const sep = out.content ? "\n\n" : "";
         out.content += sep + toolResultMarkdown(it.call_id, output);
+        out.detected = true;
+        continue;
+      }
+      if (it.type === "tool_search_call") {
+        appendResponseMarkdown(out, toolSearchCallMarkdown(it));
+        out.detected = true;
+        continue;
+      }
+      if (it.type === "tool_search_output") {
+        appendResponseMarkdown(out, toolSearchOutputMarkdown(it));
         out.detected = true;
         continue;
       }
