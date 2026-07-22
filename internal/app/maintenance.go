@@ -9,9 +9,10 @@ import (
 	"github.com/k0ngk0ng/cpa-usage/internal/storage"
 )
 
-// runMaintenance fires once per day at ~03:00 local to run storage Cleanup
-// (drop old usage rows + VACUUM). It also runs once at startup to recover
-// from any missed window from the previous run.
+// runMaintenance fires once per day at ~03:00 local to run the configured
+// storage retention cleanup. It also runs once at startup to recover from any
+// missed window from the previous run. App.Run only starts it when retention
+// cleanup is explicitly enabled.
 func runMaintenance(ctx context.Context, store storage.Store, logger *logrus.Logger) error {
 	if err := store.Cleanup(ctx, time.Now()); err != nil {
 		logger.WithError(err).Warn("startup cleanup failed")

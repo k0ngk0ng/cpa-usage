@@ -23,6 +23,9 @@ type Config struct {
 
 	StorageDriver string
 	SQLitePath    string
+	// UsageRetentionDays controls automatic deletion of usage rows.
+	// A value <= 0 disables retention cleanup and keeps usage data indefinitely.
+	UsageRetentionDays int
 
 	RedisQueueAddr    string
 	RedisQueueKey     string
@@ -50,31 +53,32 @@ type Config struct {
 // Load reads the configuration from environment variables.
 func Load() (*Config, error) {
 	cfg := &Config{
-		CPABaseURL:        strings.TrimSpace(os.Getenv("CPA_BASE_URL")),
-		CPAManagementKey:  strings.TrimSpace(os.Getenv("CPA_MANAGEMENT_KEY")),
-		RequestTimeout:    durationOr("REQUEST_TIMEOUT", 30*time.Second),
-		AppPort:           intOr("APP_PORT", 8318),
-		AppBasePath:       basePathOr(os.Getenv("APP_BASE_PATH"), "/usage"),
-		StorageDriver:     strOr("STORAGE_DRIVER", "sqlite"),
-		SQLitePath:        strOr("SQLITE_PATH", "./data/app.db"),
-		RedisQueueAddr:    strings.TrimSpace(os.Getenv("REDIS_QUEUE_ADDR")),
-		RedisQueueKey:     strOr("REDIS_QUEUE_KEY", "usage"),
-		RedisQueueBatch:   intOr("REDIS_QUEUE_BATCH_SIZE", 1000),
-		RedisIdleInterval: durationOr("REDIS_QUEUE_IDLE_INTERVAL", time.Second),
-		RedisErrorBackoff: durationOr("REDIS_QUEUE_ERROR_BACKOFF", 10*time.Second),
-		MetadataInterval:  durationOr("METADATA_SYNC_INTERVAL", 30*time.Second),
-		TZ:                strOr("TZ", "Asia/Shanghai"),
-		LogLevel:          strOr("LOG_LEVEL", "info"),
-		LogFile:           boolOr("LOG_FILE_ENABLED", true),
-		LogDir:            strOr("LOG_DIR", "./logs"),
-		LogRetention:      intOr("LOG_RETENTION_DAYS", 7),
-		CPALogDir:         strOr("CPA_LOG_DIR", "/home/cliproxy/logs"),
-		LogBodyMaxBytes:   int64Or("LOG_BODY_MAX_BYTES", 8*1024*1024),
-		LogHeaderMaxBytes: int64Or("LOG_HEADER_MAX_BYTES", 64*1024),
-		AuthEnabled:       boolOr("AUTH_ENABLED", false),
-		LoginPassword:     os.Getenv("LOGIN_PASSWORD"),
-		AuthTokenTTL:      durationOr("AUTH_SESSION_TTL", 168*time.Hour),
-		CookieName:        strOr("AUTH_COOKIE_NAME", "cpa_usage_session"),
+		CPABaseURL:         strings.TrimSpace(os.Getenv("CPA_BASE_URL")),
+		CPAManagementKey:   strings.TrimSpace(os.Getenv("CPA_MANAGEMENT_KEY")),
+		RequestTimeout:     durationOr("REQUEST_TIMEOUT", 30*time.Second),
+		AppPort:            intOr("APP_PORT", 8318),
+		AppBasePath:        basePathOr(os.Getenv("APP_BASE_PATH"), "/usage"),
+		StorageDriver:      strOr("STORAGE_DRIVER", "sqlite"),
+		SQLitePath:         strOr("SQLITE_PATH", "./data/app.db"),
+		UsageRetentionDays: intOr("USAGE_RETENTION_DAYS", 0),
+		RedisQueueAddr:     strings.TrimSpace(os.Getenv("REDIS_QUEUE_ADDR")),
+		RedisQueueKey:      strOr("REDIS_QUEUE_KEY", "usage"),
+		RedisQueueBatch:    intOr("REDIS_QUEUE_BATCH_SIZE", 1000),
+		RedisIdleInterval:  durationOr("REDIS_QUEUE_IDLE_INTERVAL", time.Second),
+		RedisErrorBackoff:  durationOr("REDIS_QUEUE_ERROR_BACKOFF", 10*time.Second),
+		MetadataInterval:   durationOr("METADATA_SYNC_INTERVAL", 30*time.Second),
+		TZ:                 strOr("TZ", "Asia/Shanghai"),
+		LogLevel:           strOr("LOG_LEVEL", "info"),
+		LogFile:            boolOr("LOG_FILE_ENABLED", true),
+		LogDir:             strOr("LOG_DIR", "./logs"),
+		LogRetention:       intOr("LOG_RETENTION_DAYS", 7),
+		CPALogDir:          strOr("CPA_LOG_DIR", "/home/cliproxy/logs"),
+		LogBodyMaxBytes:    int64Or("LOG_BODY_MAX_BYTES", 8*1024*1024),
+		LogHeaderMaxBytes:  int64Or("LOG_HEADER_MAX_BYTES", 64*1024),
+		AuthEnabled:        boolOr("AUTH_ENABLED", false),
+		LoginPassword:      os.Getenv("LOGIN_PASSWORD"),
+		AuthTokenTTL:       durationOr("AUTH_SESSION_TTL", 168*time.Hour),
+		CookieName:         strOr("AUTH_COOKIE_NAME", "cpa_usage_session"),
 	}
 	if cfg.CPABaseURL == "" {
 		return nil, errors.New("CPA_BASE_URL is required")

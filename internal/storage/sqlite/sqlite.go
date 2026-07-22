@@ -16,12 +16,14 @@ import (
 
 // Config holds the SQLite-specific configuration.
 type Config struct {
-	Path string
+	Path          string
+	RetentionDays int
 }
 
 // Store is the GORM-backed SQLite implementation of storage.Store.
 type Store struct {
-	db *gorm.DB
+	db            *gorm.DB
+	retentionDays int
 }
 
 // Open opens (or creates) the SQLite database at cfg.Path, applies migrations
@@ -46,7 +48,7 @@ func Open(cfg Config) (*Store, error) {
 	if err := db.AutoMigrate(allModels()...); err != nil {
 		return nil, fmt.Errorf("auto migrate: %w", err)
 	}
-	return &Store{db: db}, nil
+	return &Store{db: db, retentionDays: cfg.RetentionDays}, nil
 }
 
 // Close releases the underlying *sql.DB.

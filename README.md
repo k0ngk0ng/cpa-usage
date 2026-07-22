@@ -12,7 +12,7 @@ CPA v6.10 removed the legacy `/v0/management/usage/{export,import}` HTTP endpoin
 - Computes per-model cost from configurable input, output, cache-read, and cache-write price-per-1M-token settings
 - Serves an API + SPA at `/usage/*` (subpath configurable)
 - Optional JWT cookie-based password login
-- Daily 03:00 retention sweep (drops events older than 30 days, then `VACUUM`)
+- Retains usage events indefinitely by default; optional daily 03:00 retention cleanup is configurable
 
 ## Quick start (development)
 
@@ -66,9 +66,10 @@ All configuration is via environment variables (also see `.env.example`):
 | `CPA_LOG_DIR` | `/home/cliproxy/logs` | Preferred local request-log directory; missing files fall back to CPA's management API |
 | `APP_PORT` | `8318` | |
 | `APP_BASE_PATH` | `/usage` | Set to `""` for root mount |
-| `TZ` | `Asia/Shanghai` | Drives "today" boundary + 03:00 cleanup |
+| `TZ` | `Asia/Shanghai` | Drives "today" boundary + optional 03:00 cleanup |
 | `STORAGE_DRIVER` | `sqlite` | Only `sqlite` in v1 |
 | `SQLITE_PATH` | `./data/app.db` | Resolved against the process working directory |
+| `USAGE_RETENTION_DAYS` | `0` | Usage row retention; `0` keeps data indefinitely, positive values enable startup + daily 03:00 cleanup |
 | `REDIS_QUEUE_ADDR` | — | Defaults to `<cpa-host>:8317` |
 | `REDIS_QUEUE_KEY` | `usage` | RESP channel name; CPA v7+ rejects the old `queue` key |
 | `REDIS_QUEUE_BATCH_SIZE` | `1000` | Subscription persistence batch size and LPOP backlog batch size |

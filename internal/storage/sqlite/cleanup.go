@@ -5,14 +5,13 @@ import (
 	"time"
 )
 
-// retentionDays controls how many days of usage rows are kept.
-// Anything older than `now - retentionDays` is purged during Cleanup.
-const retentionDays = 30
-
 // Cleanup deletes usage events older than the retention window and runs VACUUM.
-// It is invoked daily from the maintenance loop.
+// A non-positive retention value disables cleanup and retains all usage rows.
 func (s *Store) Cleanup(ctx context.Context, now time.Time) error {
-	cutoff := now.Add(-time.Duration(retentionDays) * 24 * time.Hour).UTC()
+	if s.retentionDays <= 0 {
+		return nil
+	}
+	cutoff := now.Add(-time.Duration(s.retentionDays) * 24 * time.Hour).UTC()
 	if err := s.dbCtx(ctx).
 		Where("timestamp < ?", cutoff).
 		Delete(&usageEventModel{}).Error; err != nil {

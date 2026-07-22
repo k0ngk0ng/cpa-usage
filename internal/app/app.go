@@ -149,19 +149,24 @@ func New(cfg *config.Config, build BuildInfo) (*App, error) {
 // blocking until ctx is cancelled.
 func (a *App) Run(ctx context.Context) error {
 	a.logger.WithFields(logrus.Fields{
-		"version":    a.build.Version,
-		"base_path":  a.cfg.AppBasePath,
-		"port":       a.cfg.AppPort,
-		"sqlite":     a.cfg.SQLitePath,
-		"redis_addr": a.cfg.RedisQueueAddr,
-		"redis_key":  a.cfg.RedisQueueKey,
-		"tz":         a.cfg.TZ,
+		"version":              a.build.Version,
+		"base_path":            a.cfg.AppBasePath,
+		"port":                 a.cfg.AppPort,
+		"sqlite":               a.cfg.SQLitePath,
+		"usage_retention_days": a.cfg.UsageRetentionDays,
+		"redis_addr":           a.cfg.RedisQueueAddr,
+		"redis_key":            a.cfg.RedisQueueKey,
+		"tz":                   a.cfg.TZ,
 	}).Info("cpa-usage starting")
 
 	g, gctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error { return a.drain.Run(gctx) })
-	g.Go(func() error { return runMaintenance(gctx, a.store, a.logger) })
+	if a.cfg.UsageRetentionDays > 0 {
+		g.Go(func() error { return runMaintenance(gctx, a.store, a.logger) })
+	} else {
+		a.logger.Info("usage retention cleanup disabled; usage data will be kept indefinitely")
+	}
 
 	g.Go(func() error {
 		a.logger.WithField("addr", a.server.Addr).Info("http server listening")
@@ -196,7 +201,10 @@ func (a *App) Close() error {
 func openStore(cfg *config.Config) (storage.Store, error) {
 	switch cfg.StorageDriver {
 	case "sqlite":
-		return sqlite.Open(sqlite.Config{Path: cfg.SQLitePath})
+		return sqlite.Open(sqlite.Config{
+			Path:          cfg.SQLitePath,
+			RetentionDays: cfg.UsageRetentionDays,
+		})
 	default:
 		return nil, fmt.Errorf("unsupported STORAGE_DRIVER %q", cfg.StorageDriver)
 	}
