@@ -7,6 +7,7 @@ CPA v6.10 removed the legacy `/v0/management/usage/{export,import}` HTTP endpoin
 ## What it does
 
 - Subscribes to CPA's Redis usage stream, drains pre-subscription LPOP backlog, and persists every distinct provider-call record
+- Consumes CPA token accounting v2 when available, preserving uncached/cache-read/cache-write, total/non-reasoning/reasoning, quality, and unclassified buckets without provider-specific double counting
 - Periodically refreshes auth-files and provider catalogs from CPA management API
 - Reads per-request logs from `CPA_LOG_DIR`, falling back to CPA's authenticated `request-log-by-id` management endpoint when the filesystem is not shared
 - Computes per-model cost from configurable input, output, cache-read, and cache-write price-per-1M-token settings
@@ -88,6 +89,14 @@ On the Pricing page, Cache Write is independently configurable. Leaving it
 blank uses the model's Input price, which preserves sensible costing for older
 price rows while still allowing an explicit zero or provider-specific write rate.
 
+CPA v7.2.97+ emits canonical token accounting v2. Older queue rows remain
+supported through executor/provider-aware compatibility rules; model names are
+never used to infer token semantics. CPA v7.2.104+ also attaches downstream
+`client_ip`, `x_forwarded_for`, and `user_agent` values, and v7.2.111+ attaches
+an OAuth `access_token_sha256` fingerprint. These observability fields are
+stored with the event, so enable `AUTH_ENABLED` when the dashboard is reachable
+outside a trusted network.
+
 ## API surface
 
 All endpoints are mounted under `<APP_BASE_PATH>/api/v1`. Protected endpoints require a valid JWT auth cookie when `AUTH_ENABLED=true`.
@@ -164,6 +173,7 @@ internal/
   redact/               api_key alias + display masking
   storage/              Store interface + types
     sqlite/             gorm + glebarez/sqlite implementation
+  tokenusage/           canonical/legacy token accounting compatibility
   usage/                filter parsing, decoration, service entrypoint
 web/                    embedded SPA bundle
 .github/workflows/      goreleaser pipeline

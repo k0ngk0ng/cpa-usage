@@ -189,8 +189,15 @@ type UsageRecord struct {
 	TTFTMs              int64           `json:"ttft_ms"`
 	Source              string          `json:"source"`
 	AuthIndex           string          `json:"auth_index"`
+	AccessTokenSHA256   string          `json:"access_token_sha256"`
+	ClientIP            string          `json:"client_ip"`
+	XForwardedFor       string          `json:"x_forwarded_for"`
+	UserAgent           string          `json:"user_agent"`
 	Tokens              UsageTokens     `json:"tokens"`
+	AccountingVersion   int             `json:"accounting_version"`
+	TokenBreakdown      TokenBreakdown  `json:"token_breakdown"`
 	Failed              bool            `json:"failed"`
+	Generate            *bool           `json:"generate"`
 	Fail                UsageFail       `json:"fail"`
 	ResponseHeaders     json.RawMessage `json:"response_headers"`
 	Provider            string          `json:"provider"`
@@ -209,13 +216,72 @@ type UsageRecord struct {
 
 // UsageTokens is the nested token stats object from CPA.
 type UsageTokens struct {
-	InputTokens         int64 `json:"input_tokens"`
-	OutputTokens        int64 `json:"output_tokens"`
-	ReasoningTokens     int64 `json:"reasoning_tokens"`
-	CachedTokens        int64 `json:"cached_tokens"`
-	CacheReadTokens     int64 `json:"cache_read_tokens"`
-	CacheCreationTokens int64 `json:"cache_creation_tokens"`
-	TotalTokens         int64 `json:"total_tokens"`
+	InputTokens            int64 `json:"input_tokens"`
+	OutputTokens           int64 `json:"output_tokens"`
+	ReasoningTokens        int64 `json:"reasoning_tokens"`
+	CachedTokens           int64 `json:"cached_tokens"`
+	CacheReadTokens        int64 `json:"cache_read_tokens"`
+	CacheReadTokensPresent bool  `json:"cache_read_tokens_present"`
+	CacheCreationTokens    int64 `json:"cache_creation_tokens"`
+	TotalTokens            int64 `json:"total_tokens"`
+}
+
+// TokenBreakdown is CPA's canonical, non-overlapping token accounting v2
+// contract. Legacy counters remain in UsageTokens for compatibility.
+type TokenBreakdown struct {
+	SchemaVersion      int                  `json:"schema_version"`
+	Quality            string               `json:"quality"`
+	TotalTokens        int64                `json:"total_tokens"`
+	Input              TokenInputBreakdown  `json:"input"`
+	Output             TokenOutputBreakdown `json:"output"`
+	UnclassifiedTokens int64                `json:"unclassified_tokens"`
+}
+
+type TokenInputBreakdown struct {
+	TotalTokens      int64 `json:"total_tokens"`
+	UncachedTokens   int64 `json:"uncached_tokens"`
+	CacheReadTokens  int64 `json:"cache_read_tokens"`
+	CacheWriteTokens int64 `json:"cache_write_tokens"`
+}
+
+type TokenOutputBreakdown struct {
+	TotalTokens        int64 `json:"total_tokens"`
+	NonReasoningTokens int64 `json:"non_reasoning_tokens"`
+	ReasoningTokens    int64 `json:"reasoning_tokens"`
+}
+
+// Valid applies the same v2 invariants as CLIProxyAPI before the canonical
+// structure is allowed to override legacy provider counters.
+func (b TokenBreakdown) Valid() bool {
+	if b.SchemaVersion != 2 {
+		return false
+	}
+	switch b.Quality {
+	case "complete", "inconsistent", "unclassified":
+	default:
+		return false
+	}
+	if !matchesNonNegativeSum(b.Input.TotalTokens, b.Input.UncachedTokens, b.Input.CacheReadTokens, b.Input.CacheWriteTokens) ||
+		!matchesNonNegativeSum(b.Output.TotalTokens, b.Output.NonReasoningTokens, b.Output.ReasoningTokens) ||
+		!matchesNonNegativeSum(b.TotalTokens, b.Input.TotalTokens, b.Output.TotalTokens, b.UnclassifiedTokens) {
+		return false
+	}
+	return b.Quality != "complete" || b.UnclassifiedTokens == 0
+}
+
+func matchesNonNegativeSum(total int64, values ...int64) bool {
+	if total < 0 {
+		return false
+	}
+	var sum int64
+	const maxInt64 = int64(^uint64(0) >> 1)
+	for _, value := range values {
+		if value < 0 || sum > maxInt64-value {
+			return false
+		}
+		sum += value
+	}
+	return sum == total
 }
 
 // UsageFail is the nested failure detail object from CPA.

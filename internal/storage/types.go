@@ -16,20 +16,30 @@ type UsageEvent struct {
 	APIGroupKey         string // api_key | provider | endpoint | "unknown"
 	Source              string
 	AuthIndex           string
+	AccessTokenSHA256   string
+	ClientIP            string
+	XForwardedFor       string
+	UserAgent           string
 	AuthType            string
 	APIKey              string
 	Endpoint            string
 	RequestID           string
 	LatencyMs           int64
 	TTFTMs              int64
-	InputTokens         int64
-	OutputTokens        int64
-	ReasoningTokens     int64
+	InputTokens         int64 // normalized uncached input
+	OutputTokens        int64 // canonical total output for v2; legacy provider counter otherwise
+	ReasoningTokens     int64 // subset of canonical total output, separate on some legacy providers
 	CachedTokens        int64
 	CacheReadTokens     int64
+	CacheReadPresent    bool
 	CacheCreationTokens int64
+	NonReasoningTokens  int64
+	UnclassifiedTokens  int64
 	TotalTokens         int64
+	AccountingVersion   int
+	AccountingQuality   string
 	Failed              bool
+	Generate            bool
 	FailStatusCode      int
 	FailBody            string
 	ResponseHeaders     string
@@ -150,6 +160,10 @@ type UsageEventRecord struct {
 	Source              string          `json:"source"`
 	SourceDisplay       string          `json:"source_display"`
 	AuthIndex           string          `json:"auth_index"`
+	AccessTokenSHA256   string          `json:"access_token_sha256"`
+	ClientIP            string          `json:"client_ip"`
+	XForwardedFor       string          `json:"x_forwarded_for"`
+	UserAgent           string          `json:"user_agent"`
 	AuthType            string          `json:"auth_type"`
 	Endpoint            string          `json:"endpoint"`
 	RequestID           string          `json:"request_id"`
@@ -160,9 +174,15 @@ type UsageEventRecord struct {
 	ReasoningTokens     int64           `json:"reasoning_tokens"`
 	CachedTokens        int64           `json:"cached_tokens"`
 	CacheReadTokens     int64           `json:"cache_read_tokens"`
+	CacheReadPresent    bool            `json:"cache_read_tokens_present"`
 	CacheCreationTokens int64           `json:"cache_creation_tokens"`
+	NonReasoningTokens  int64           `json:"non_reasoning_tokens"`
+	UnclassifiedTokens  int64           `json:"unclassified_tokens"`
 	TotalTokens         int64           `json:"total_tokens"`
+	AccountingVersion   int             `json:"accounting_version"`
+	AccountingQuality   string          `json:"accounting_quality"`
 	Failed              bool            `json:"failed"`
+	Generate            bool            `json:"generate"`
 	FailStatusCode      int             `json:"fail_status_code"`
 	FailBody            string          `json:"fail_body"`
 	ResponseHeaders     json.RawMessage `json:"response_headers,omitempty"`
@@ -218,6 +238,8 @@ type UsageAggregationRow struct {
 	CachedTokens        int64   `json:"cached_tokens"`
 	CacheReadTokens     int64   `json:"cache_read_tokens"`
 	CacheCreationTokens int64   `json:"cache_creation_tokens"`
+	NonReasoningTokens  int64   `json:"non_reasoning_tokens"`
+	UnclassifiedTokens  int64   `json:"unclassified_tokens"`
 	TotalTokens         int64   `json:"total_tokens"`
 	Cost                float64 `json:"cost"`
 }
@@ -268,6 +290,8 @@ type UsageSummary struct {
 	CachedTokens        int64   `json:"cached_tokens"`
 	CacheReadTokens     int64   `json:"cache_read_tokens"`
 	CacheCreationTokens int64   `json:"cache_creation_tokens"`
+	NonReasoningTokens  int64   `json:"non_reasoning_tokens"`
+	UnclassifiedTokens  int64   `json:"unclassified_tokens"`
 	TotalTokens         int64   `json:"total_tokens"`
 	Cost                float64 `json:"cost"`
 }
@@ -284,6 +308,8 @@ type UsageBucket struct {
 	CachedTokens        int64     `json:"cached_tokens"`
 	CacheReadTokens     int64     `json:"cache_read_tokens"`
 	CacheCreationTokens int64     `json:"cache_creation_tokens"`
+	NonReasoningTokens  int64     `json:"non_reasoning_tokens"`
+	UnclassifiedTokens  int64     `json:"unclassified_tokens"`
 	TotalTokens         int64     `json:"total_tokens"`
 	Cost                float64   `json:"cost"`
 }

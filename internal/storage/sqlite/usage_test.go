@@ -25,6 +25,10 @@ func TestInsertAndListUsageEventNewFields(t *testing.T) {
 		Alias:               "client-gpt",
 		APIGroupKey:         "test-key",
 		APIKey:              "test-key",
+		AccessTokenSHA256:   "token-version-hash",
+		ClientIP:            "192.0.2.10",
+		XForwardedFor:       "203.0.113.5",
+		UserAgent:           "test-client/1.0",
 		RequestID:           "req_123",
 		LatencyMs:           1500,
 		TTFTMs:              320,
@@ -33,15 +37,21 @@ func TestInsertAndListUsageEventNewFields(t *testing.T) {
 		ReasoningTokens:     3,
 		CachedTokens:        4,
 		CacheReadTokens:     4,
+		CacheReadPresent:    true,
 		CacheCreationTokens: 5,
+		NonReasoningTokens:  17,
+		UnclassifiedTokens:  3,
 		TotalTokens:         42,
+		AccountingVersion:   2,
+		AccountingQuality:   "unclassified",
 		Failed:              true,
+		Generate:            false,
 		FailStatusCode:      429,
 		FailBody:            "rate limited",
 		ResponseHeaders:     `{"Retry-After":["30"]}`,
 		ReasoningEffort:     "medium",
 		ServiceTier:         "priority",
-		RequestServiceTier:  "priority",
+		RequestServiceTier:  "deprecated-tier",
 		ResponseServiceTier: "default",
 	}
 	inserted, deduped, err := store.InsertUsageEvents(context.Background(), []storage.UsageEvent{event})
@@ -66,6 +76,14 @@ func TestInsertAndListUsageEventNewFields(t *testing.T) {
 	if got.CacheReadTokens != event.CacheReadTokens || got.CacheCreationTokens != event.CacheCreationTokens {
 		t.Fatalf("cache split = %d/%d", got.CacheReadTokens, got.CacheCreationTokens)
 	}
+	if !got.CacheReadPresent || got.NonReasoningTokens != 17 || got.UnclassifiedTokens != 3 ||
+		got.AccountingVersion != 2 || got.AccountingQuality != "unclassified" {
+		t.Fatalf("accounting fields = %+v", got)
+	}
+	if got.Generate || got.AccessTokenSHA256 != event.AccessTokenSHA256 || got.ClientIP != event.ClientIP ||
+		got.XForwardedFor != event.XForwardedFor || got.UserAgent != event.UserAgent {
+		t.Fatalf("queue metadata = %+v", got)
+	}
 	if got.FailStatusCode != event.FailStatusCode || got.FailBody != event.FailBody {
 		t.Fatalf("fail = %d/%q", got.FailStatusCode, got.FailBody)
 	}
@@ -73,7 +91,7 @@ func TestInsertAndListUsageEventNewFields(t *testing.T) {
 		t.Fatalf("response_headers = %s", got.ResponseHeaders)
 	}
 	if got.ReasoningEffort != event.ReasoningEffort || got.ServiceTier != event.ServiceTier ||
-		got.RequestServiceTier != event.RequestServiceTier || got.ResponseServiceTier != event.ResponseServiceTier {
+		got.RequestServiceTier != event.ServiceTier || got.ResponseServiceTier != event.ResponseServiceTier {
 		t.Fatalf("reasoning/service tiers = %q/%q/%q/%q", got.ReasoningEffort, got.ServiceTier, got.RequestServiceTier, got.ResponseServiceTier)
 	}
 }
@@ -220,5 +238,77 @@ func TestUsageQueriesIncludeCacheWriteCost(t *testing.T) {
 	}
 	if len(page.Items) != 1 || page.Items[0].Cost != 9 {
 		t.Fatalf("events = %#v", page.Items)
+	}
+}
+
+func TestUsageQueriesNormalizeLegacyAndCanonicalOutputTotals(t *testing.T) {
+	store, err := Open(Config{Path: filepath.Join(t.TempDir(), "usage.db")})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	const million = int64(1_000_000)
+	events := []storage.UsageEvent{
+		{
+			EventKey:          "legacy-gemini",
+			Timestamp:         time.Now().UTC(),
+			Provider:          "gemini",
+			ExecutorType:      "GeminiExecutor",
+			Model:             "m",
+			OutputTokens:      30 * million,
+			ReasoningTokens:   12 * million,
+			AccountingQuality: "legacy",
+			Generate:          true,
+		},
+		{
+			EventKey:           "canonical-openai",
+			Timestamp:          time.Now().UTC(),
+			Provider:           "openai",
+			ExecutorType:       "CodexExecutor",
+			Model:              "m",
+			OutputTokens:       42 * million,
+			NonReasoningTokens: 30 * million,
+			ReasoningTokens:    12 * million,
+			AccountingVersion:  2,
+			AccountingQuality:  "complete",
+			Generate:           true,
+		},
+	}
+	if _, _, err := store.InsertUsageEvents(context.Background(), events); err != nil {
+		t.Fatalf("InsertUsageEvents: %v", err)
+	}
+	prices := map[string]storage.ModelPriceSetting{
+		"m": {Model: "m", CompletionPricePer1M: 1},
+	}
+
+	page, err := store.ListUsageEvents(context.Background(), storage.UsageFilter{}, storage.Page{Page: 1, PageSize: 20}, prices)
+	if err != nil {
+		t.Fatalf("ListUsageEvents: %v", err)
+	}
+	if len(page.Items) != 2 {
+		t.Fatalf("events = %d, want 2", len(page.Items))
+	}
+	for _, item := range page.Items {
+		if item.OutputTokens != 42*million || item.NonReasoningTokens != 30*million || item.Cost != 42 {
+			t.Fatalf("normalized event = %+v", item)
+		}
+	}
+
+	overview, err := store.BuildUsageOverview(context.Background(), storage.UsageFilter{}, prices)
+	if err != nil {
+		t.Fatalf("BuildUsageOverview: %v", err)
+	}
+	if overview.Summary.OutputTokens != 84*million || overview.Summary.NonReasoningTokens != 60*million ||
+		overview.Summary.ReasoningTokens != 24*million || overview.Summary.Cost != 84 {
+		t.Fatalf("overview summary = %+v", overview.Summary)
+	}
+
+	analysis, err := store.ListUsageAnalysis(context.Background(), storage.UsageFilter{}, prices)
+	if err != nil {
+		t.Fatalf("ListUsageAnalysis: %v", err)
+	}
+	if len(analysis.ByModel) != 1 || analysis.ByModel[0].OutputTokens != 84*million || analysis.ByModel[0].Cost != 84 {
+		t.Fatalf("analysis = %+v", analysis.ByModel)
 	}
 }

@@ -40,8 +40,9 @@ const numericColumns = (): Column<UsageAggregationRow>[] => [
       </span>
     ),
   },
-  { header: "Output", align: "right", cell: (r) => formatNumber(r.output_tokens) },
-  { header: "Reasoning", align: "right", cell: (r) => formatNumber(r.reasoning_tokens) },
+  { header: "Output total", align: "right", cell: (r) => formatNumber(r.output_tokens) },
+  { header: "Reasoning (included)", align: "right", cell: (r) => formatNumber(r.reasoning_tokens) },
+  { header: "Unclassified", align: "right", cell: (r) => formatNumber(r.unclassified_tokens) },
   { header: "Cost", align: "right", cell: (r) => formatCost(r.cost) },
 ];
 

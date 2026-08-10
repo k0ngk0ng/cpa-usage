@@ -61,7 +61,21 @@ func TestOpenMigratesPreV721Schema(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	for _, column := range []string{"executor_type", "request_service_tier", "response_service_tier"} {
+	for _, column := range []string{
+		"executor_type",
+		"request_service_tier",
+		"response_service_tier",
+		"accounting_version",
+		"accounting_quality",
+		"non_reasoning_tokens",
+		"unclassified_tokens",
+		"cache_read_tokens_present",
+		"generate",
+		"access_token_sha256",
+		"client_ip",
+		"x_forwarded_for",
+		"user_agent",
+	} {
 		if !store.db.Migrator().HasColumn(&usageEventModel{}, column) {
 			t.Fatalf("usage_events missing migrated column %q", column)
 		}
@@ -81,7 +95,7 @@ func TestOpenMigratesPreV721Schema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list migrated usage: %v", err)
 	}
-	if len(page.Items) != 1 || page.Items[0].RequestServiceTier != "priority" {
+	if len(page.Items) != 1 || page.Items[0].RequestServiceTier != "priority" || !page.Items[0].Generate {
 		t.Fatalf("migrated request tier = %#v", page.Items)
 	}
 	var price modelPriceSettingModel

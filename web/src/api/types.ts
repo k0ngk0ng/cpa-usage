@@ -51,6 +51,8 @@ export interface UsageSummary {
   cached_tokens: number;
   cache_read_tokens: number;
   cache_creation_tokens: number;
+  non_reasoning_tokens: number;
+  unclassified_tokens: number;
   total_tokens: number;
   cost: number;
 }
@@ -66,6 +68,8 @@ export interface UsageBucket {
   cached_tokens: number;
   cache_read_tokens: number;
   cache_creation_tokens: number;
+  non_reasoning_tokens: number;
+  unclassified_tokens: number;
   total_tokens: number;
   cost: number;
 }
@@ -118,6 +122,10 @@ export interface UsageEventRecord {
   source: string;
   source_display: string;
   auth_index: string;
+  access_token_sha256: string;
+  client_ip: string;
+  x_forwarded_for: string;
+  user_agent: string;
   auth_type: string;
   endpoint: string;
   request_id: string;
@@ -128,9 +136,15 @@ export interface UsageEventRecord {
   reasoning_tokens: number;
   cached_tokens: number;
   cache_read_tokens: number;
+  cache_read_tokens_present: boolean;
   cache_creation_tokens: number;
+  non_reasoning_tokens: number;
+  unclassified_tokens: number;
   total_tokens: number;
+  accounting_version: number;
+  accounting_quality: string;
   failed: boolean;
+  generate: boolean;
   fail_status_code: number;
   fail_body: string;
   response_headers?: Record<string, string[]>;
@@ -182,6 +196,8 @@ export interface UsageAggregationRow {
   cached_tokens: number;
   cache_read_tokens: number;
   cache_creation_tokens: number;
+  non_reasoning_tokens: number;
+  unclassified_tokens: number;
   total_tokens: number;
   cost: number;
 }

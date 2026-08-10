@@ -208,21 +208,21 @@ export default function EventLogModal({ event, onClose }: Props) {
         onClick={(e) => e.stopPropagation()}
       >
         <header
-          className="flex items-center justify-between px-4 py-3 border-b border-border cursor-move select-none"
+          className="flex items-start gap-2 border-b border-border px-3 py-3 cursor-move select-none sm:items-center sm:px-4"
           onPointerDown={startDrag}
           onDoubleClick={resetRectFromHeader}
           title="Drag to move. Double-click to reset."
         >
-          <div className="flex items-baseline gap-3 min-w-0">
-            <h2 className="text-sm font-semibold">Request log</h2>
-            <span className="font-mono text-xs text-muted truncate">
+          <div className="min-w-0 flex-1 sm:flex sm:items-baseline sm:gap-3">
+            <h2 className="whitespace-nowrap text-sm font-semibold">Request log</h2>
+            <span className="mt-0.5 block truncate font-mono text-[10px] text-muted sm:mt-0 sm:text-xs">
               {event.request_id}
             </span>
-            <span className="text-xs text-muted whitespace-nowrap">
+            <span className="mt-0.5 block whitespace-nowrap text-[10px] text-muted sm:mt-0 sm:text-xs">
               {formatTimestamp(event.timestamp)}
             </span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1 sm:gap-2">
             <a
               href={downloadHref}
               download
@@ -510,6 +510,10 @@ function eventRecordMap(event: UsageEventRecord): Record<string, string> {
     source: displayValue(event.source),
     source_display: displayValue(event.source_display),
     auth_index: displayValue(event.auth_index),
+    access_token_sha256: displayValue(event.access_token_sha256),
+    client_ip: displayValue(event.client_ip),
+    x_forwarded_for: displayValue(event.x_forwarded_for),
+    user_agent: displayValue(event.user_agent),
     auth_type: displayValue(event.auth_type),
     endpoint: displayValue(event.endpoint),
     request_id: displayValue(event.request_id),
@@ -518,11 +522,17 @@ function eventRecordMap(event: UsageEventRecord): Record<string, string> {
     input_tokens: formatNumber(event.input_tokens),
     cached_tokens: formatNumber(event.cached_tokens),
     cache_read_tokens: formatNumber(event.cache_read_tokens),
+    cache_read_tokens_present: event.cache_read_tokens_present ? "true" : "false",
     cache_creation_tokens: formatNumber(event.cache_creation_tokens),
     output_tokens: formatNumber(event.output_tokens),
+    non_reasoning_tokens: formatNumber(event.non_reasoning_tokens),
     reasoning_tokens: formatNumber(event.reasoning_tokens),
+    unclassified_tokens: formatNumber(event.unclassified_tokens),
     total_tokens: formatNumber(event.total_tokens),
+    accounting_version: event.accounting_version ? String(event.accounting_version) : "legacy",
+    accounting_quality: displayValue(event.accounting_quality),
     failed: event.failed ? "true" : "false",
+    generate: event.generate ? "true" : "false",
     fail_status_code: event.fail_status_code ? String(event.fail_status_code) : "—",
     fail_body: displayValue(event.fail_body),
     reasoning_effort: displayValue(event.reasoning_effort),

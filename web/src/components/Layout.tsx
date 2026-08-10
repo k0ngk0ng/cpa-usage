@@ -66,13 +66,13 @@ export default function Layout({ children, authRequired, onLogout }: Props) {
         Date.now() - new Date(status.last_pop_at).getTime() < 5 * 60_000));
 
   return (
-    <div className="min-h-full flex flex-col">
+    <div className="min-h-full min-w-0 flex flex-col">
       <header className="border-b border-border bg-panel">
-        <div className="max-w-[1400px] mx-auto px-6 py-4 flex items-center gap-6">
-          <Link to="/" className="text-lg font-semibold tracking-tight text-ink">
+        <div className="max-w-[1400px] mx-auto px-4 py-3 sm:px-6 sm:py-4 flex flex-wrap items-center gap-x-3 gap-y-3 lg:flex-nowrap lg:gap-6">
+          <Link to="/" className="shrink-0 whitespace-nowrap text-lg font-semibold tracking-tight text-ink">
             CPA <span className="text-accent">Usage</span>
           </Link>
-          <nav className="flex items-center gap-1 text-sm">
+          <nav className="order-3 grid w-full grid-cols-4 gap-1 text-[11px] lg:order-none lg:flex lg:w-auto lg:items-center lg:text-sm">
             {NAV.map((item) => (
               <NavLink
                 key={item.to}
@@ -80,7 +80,7 @@ export default function Layout({ children, authRequired, onLogout }: Props) {
                 end={item.end}
                 className={({ isActive }) =>
                   clsx(
-                    "px-3 py-1.5 rounded-md text-muted hover:text-ink hover:bg-panel2 transition-colors",
+                    "min-w-0 truncate rounded-md px-0.5 py-1.5 text-center text-muted transition-colors hover:bg-panel2 hover:text-ink lg:px-3",
                     isActive && "bg-panel2 text-ink",
                   )
                 }
@@ -89,7 +89,7 @@ export default function Layout({ children, authRequired, onLogout }: Props) {
               </NavLink>
             ))}
           </nav>
-          <div className="ml-auto flex items-center gap-4 text-xs text-muted">
+          <div className="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted sm:gap-4">
             <RefreshControl />
             <DrainBadge status={status} healthy={!!drainHealthy} />
             {authRequired && (
@@ -103,8 +103,8 @@ export default function Layout({ children, authRequired, onLogout }: Props) {
           </div>
         </div>
       </header>
-      <main className="flex-1 pb-10">
-        <div className="max-w-[1400px] mx-auto px-6 py-6">{children}</div>
+      <main className="min-w-0 flex-1 pb-10">
+        <div className="max-w-[1400px] min-w-0 mx-auto px-4 py-4 sm:px-6 sm:py-6">{children}</div>
       </main>
       <Footer version={version} />
     </div>
@@ -118,7 +118,7 @@ function Footer({ version }: { version: VersionInfo | null }) {
   const cpaLabel = formatBuild(cpa);
   return (
     <footer className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-panel/95 backdrop-blur">
-      <div className="max-w-[1400px] mx-auto px-6 py-2 flex items-center gap-4 text-[11px] text-muted">
+      <div className="max-w-[1400px] mx-auto px-4 py-2 sm:px-6 flex items-center gap-4 text-[11px] text-muted">
         <span>
           cpa-usage <span className="font-mono text-ink">{ourLabel || "dev"}</span>
         </span>
@@ -169,17 +169,30 @@ function RefreshControl() {
 
 function DrainBadge({ status, healthy }: { status: DrainStatus | null; healthy: boolean }) {
   if (!status) {
-    return <span className="text-muted">drain: …</span>;
+    return (
+      <span
+        role="status"
+        className="inline-block h-2 w-2 rounded-full bg-muted"
+        aria-label="Drain status loading"
+        title="Drain status loading"
+      />
+    );
   }
   return (
-    <div className="flex items-center gap-2" title={status.last_error || ""}>
+    <div
+      role="status"
+      className="flex items-center gap-2"
+      aria-label={`Drain ${status.redis_mode || "queue"}; last receive ${formatRelative(status.last_pop_at)}; ${status.total_inserted.toLocaleString()} ingested`}
+      title={status.last_error || ""}
+    >
       <span
+        aria-hidden="true"
         className={clsx(
           "inline-block w-2 h-2 rounded-full",
           healthy ? "bg-success" : status.last_error ? "bg-danger" : "bg-warn",
         )}
       />
-      <span>
+      <span className="hidden xl:inline">
         {status.redis_mode || "queue"} · last receive {formatRelative(status.last_pop_at)} ·{" "}
         {status.total_inserted.toLocaleString()} ingested
       </span>

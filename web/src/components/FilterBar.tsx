@@ -73,15 +73,15 @@ export default function FilterBar({
   };
 
   return (
-    <div className="relative z-30 bg-panel border border-border rounded-lg p-4 mb-6 space-y-3">
-      <div className="flex flex-wrap gap-2 items-center">
-        <span className="text-xs text-muted uppercase tracking-wider mr-1">Range</span>
+    <div className="relative z-30 mb-4 space-y-3 rounded-lg border border-border bg-panel p-3 sm:mb-6 sm:p-4">
+      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+        <span className="mr-1 basis-full text-xs uppercase tracking-wider text-muted sm:basis-auto">Range</span>
         {RANGE_PRESETS.map((p) => (
           <button
             key={p.key}
             onClick={() => updateRange(p.key)}
             className={clsx(
-              "px-3 py-1 rounded text-xs border transition-colors",
+              "rounded border px-2.5 py-1 text-xs transition-colors sm:px-3",
               filter.range === p.key
                 ? "bg-accent text-bg border-accent"
                 : "bg-panel2 text-muted border-border hover:text-ink",
@@ -91,7 +91,7 @@ export default function FilterBar({
           </button>
         ))}
         {filter.range === "custom" && (
-          <div className="flex flex-wrap items-center gap-2 ml-2">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:ml-2 sm:w-auto">
             <DateTimeField
               dateLabel="Start date"
               timeLabel="Start time"
@@ -146,6 +146,7 @@ export default function FilterBar({
           )}
           {showResult && (
             <select
+              aria-label="Result"
               value={filter.result}
               onChange={(e) => update({ result: e.target.value as ResultFilter })}
               className="bg-panel2 border border-border rounded px-2 py-1 text-xs"

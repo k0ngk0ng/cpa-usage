@@ -113,7 +113,15 @@ export default function Overview() {
               : "—"
           }
         />
-        <MetricCard label="Output" value={formatTokens(summary?.output_tokens)} />
+        <MetricCard
+          label="Output"
+          value={formatTokens(summary?.output_tokens)}
+          hint={
+            summary
+              ? `${formatTokens(summary.reasoning_tokens)} reasoning included${summary.unclassified_tokens ? ` · ${formatTokens(summary.unclassified_tokens)} unclassified` : ""}`
+              : "—"
+          }
+        />
         <MetricCard
           label="Cost"
           value={formatCost(summary?.cost ?? 0)}

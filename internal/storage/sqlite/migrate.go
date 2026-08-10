@@ -14,6 +14,10 @@ type usageEventModel struct {
 	APIGroupKey         string    `gorm:"size:128;index;column:api_group_key"`
 	Source              string    `gorm:"size:256;index"`
 	AuthIndex           string    `gorm:"size:64;index"`
+	AccessTokenSHA256   string    `gorm:"size:64;index;column:access_token_sha256"`
+	ClientIP            string    `gorm:"size:128;index;column:client_ip"`
+	XForwardedFor       string    `gorm:"column:x_forwarded_for"`
+	UserAgent           string    `gorm:"column:user_agent"`
 	AuthType            string    `gorm:"size:32"`
 	APIKey              string    `gorm:"size:128;column:api_key"`
 	Endpoint            string    `gorm:"size:128"`
@@ -25,9 +29,15 @@ type usageEventModel struct {
 	ReasoningTokens     int64
 	CachedTokens        int64
 	CacheReadTokens     int64
+	CacheReadPresent    bool `gorm:"column:cache_read_tokens_present"`
 	CacheCreationTokens int64
+	NonReasoningTokens  int64
+	UnclassifiedTokens  int64
 	TotalTokens         int64
-	Failed              bool `gorm:"index"`
+	AccountingVersion   int    `gorm:"index"`
+	AccountingQuality   string `gorm:"size:32;index"`
+	Failed              bool   `gorm:"index"`
+	Generate            *bool  `gorm:"index"`
 	FailStatusCode      int
 	FailBody            string
 	ResponseHeaders     string

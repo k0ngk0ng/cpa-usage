@@ -12,8 +12,9 @@ Apply changes:
   scripts/fix_usage_token_history.sh --db /home/cliproxy/cpa-usage/data/app.db --apply --yes
 
 What it changes:
-  1. OpenAI/Codex/Gemini/OpenAI-compatible style rows where input_tokens was
-     the upstream total prompt/input and cached_tokens was part of it:
+  1. Known total-input executor/provider rows (OpenAI/Codex/Gemini and
+     OpenAI-compatible families) where input_tokens was the upstream total
+     prompt/input and cached_tokens was part of it:
        input_tokens      := max(input_tokens - cached_tokens, 0)
        cache_read_tokens := cached_tokens
 
@@ -26,6 +27,7 @@ What it changes:
        cached_tokens := cache_read_tokens
 
 What it does not change:
+  - validated canonical accounting v2 rows are already normalized and skipped.
   - total_tokens is preserved as the upstream/request total.
   - old Claude rows without cache_read_tokens/cache_creation_tokens are left
     unchanged because read vs creation cannot be reconstructed losslessly.
@@ -94,52 +96,89 @@ if [[ "$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM pragma_table_info('usage_event
   EXECUTOR_TYPE_EXPR="lower(trim(coalesce(executor_type, '')))"
 fi
 
+ACCOUNTING_VERSION_EXPR="0"
+if [[ "$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM pragma_table_info('usage_events') WHERE name='accounting_version';")" == "1" ]]; then
+  ACCOUNTING_VERSION_EXPR="coalesce(accounting_version, 0)"
+fi
+
+ACCOUNTING_QUALITY_EXPR="''"
+if [[ "$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM pragma_table_info('usage_events') WHERE name='accounting_quality';")" == "1" ]]; then
+  ACCOUNTING_QUALITY_EXPR="lower(trim(coalesce(accounting_quality, '')))"
+fi
+
 read -r -d '' PREDICATES <<SQL || true
-WITH classified AS (
+WITH base AS (
   SELECT
     *,
+    ${EXECUTOR_TYPE_EXPR} AS token_executor,
+    lower(trim(coalesce(provider, ''))) AS token_provider,
     (
-      ${EXECUTOR_TYPE_EXPR} = 'claudeexecutor' OR
-      (
-        ${EXECUTOR_TYPE_EXPR} = '' AND
-        lower(trim(coalesce(provider, ''))) IN ('claude', 'anthropic')
-      )
-    ) AS is_claude_style,
-    (
-      (${EXECUTOR_TYPE_EXPR} != '' AND ${EXECUTOR_TYPE_EXPR} != 'claudeexecutor') OR
-      lower(coalesce(provider, '')) LIKE '%openai%' OR
-      lower(coalesce(provider, '')) LIKE '%codex%' OR
-      lower(coalesce(provider, '')) LIKE '%gemini%' OR
-      lower(coalesce(provider, '')) LIKE '%interactions%' OR
-      lower(coalesce(provider, '')) LIKE '%vertex%' OR
-      lower(coalesce(provider, '')) LIKE '%antigravity%' OR
-      lower(coalesce(provider, '')) LIKE '%aistudio%' OR
-      lower(coalesce(provider, '')) LIKE '%xai%' OR
-      lower(coalesce(provider, '')) LIKE '%kimi%' OR
-      lower(coalesce(model, '')) LIKE 'gpt%' OR
-      lower(coalesce(model, '')) LIKE 'o1%' OR
-      lower(coalesce(model, '')) LIKE 'o3%' OR
-      lower(coalesce(model, '')) LIKE 'o4%' OR
-      lower(coalesce(model, '')) LIKE '%gemini%' OR
-      lower(coalesce(model, '')) LIKE '%codex%' OR
-      lower(coalesce(model, '')) LIKE '%grok%' OR
-      lower(coalesce(model, '')) LIKE '%kimi%'
-    ) AS is_total_input_style
+      ${ACCOUNTING_VERSION_EXPR} = 2 AND
+      ${ACCOUNTING_QUALITY_EXPR} IN ('complete', 'inconsistent', 'unclassified')
+    ) AS is_canonical_v2
   FROM usage_events
+),
+styled AS (
+  SELECT
+    *,
+    CASE
+      WHEN token_executor = 'claudeexecutor' THEN 'independent'
+      WHEN token_executor IN (
+        'geminiexecutor',
+        'geminivertexexecutor',
+        'aistudioexecutor',
+        'antigravityexecutor',
+        'openaicompatexecutor',
+        'codexexecutor',
+        'codexwebsocketsexecutor',
+        'codexautoexecutor',
+        'xaiexecutor',
+        'xaiwebsocketsexecutor',
+        'xaiautoexecutor',
+        'kimiexecutor'
+      ) THEN 'total_input'
+      WHEN token_provider IN ('claude', 'anthropic') THEN 'independent'
+      WHEN token_provider IN (
+        'gemini',
+        'gemini-interactions',
+        'interactions',
+        'aistudio',
+        'antigravity',
+        'vertex',
+        'openai',
+        'codex',
+        'xai',
+        'grok',
+        'kimi',
+        'qwen',
+        'deepseek',
+        'openrouter',
+        'openai-compatibility'
+      ) OR token_provider LIKE 'openai-compatible-%' THEN 'total_input'
+      ELSE 'unknown'
+    END AS token_style
+  FROM base
+),
+classified AS (
+  SELECT
+    *,
+    token_style = 'independent' AS is_claude_style,
+    token_style = 'total_input' AS is_total_input_style
+  FROM styled
 ),
 targets AS (
   SELECT
     *,
     (
+      is_canonical_v2 = 0 AND
       is_total_input_style = 1 AND
-      is_claude_style = 0 AND
       cached_tokens > 0 AND
       cache_read_tokens = 0 AND
       cache_creation_tokens = 0
     ) AS needs_total_style_split,
     (
+      is_canonical_v2 = 0 AND
       is_total_input_style = 1 AND
-      is_claude_style = 0 AND
       (cache_read_tokens != 0 OR cache_creation_tokens != 0) AND
       (
         total_tokens = input_tokens + output_tokens OR
@@ -147,6 +186,7 @@ targets AS (
       )
     ) AS needs_explicit_total_style_split,
     (
+      is_canonical_v2 = 0 AND
       is_claude_style = 1 AND
       (cache_read_tokens != 0 OR cache_creation_tokens != 0) AND
       cached_tokens != cache_read_tokens
@@ -168,7 +208,8 @@ SELECT
   SUM(CASE WHEN needs_total_style_split OR needs_explicit_total_style_split THEN 1 ELSE 0 END) AS rows_to_split_total_style,
   SUM(CASE WHEN needs_claude_cached_fix THEN 1 ELSE 0 END) AS rows_to_fix_claude_cached,
   SUM(CASE
-    WHEN cached_tokens > 0
+    WHEN is_canonical_v2 = 0
+     AND cached_tokens > 0
      AND cache_read_tokens = 0
      AND cache_creation_tokens = 0
      AND is_total_input_style = 0
@@ -176,7 +217,8 @@ SELECT
     THEN 1 ELSE 0
   END) AS ambiguous_cached_rows,
   SUM(CASE
-    WHEN cached_tokens > 0
+    WHEN is_canonical_v2 = 0
+     AND cached_tokens > 0
      AND cache_read_tokens = 0
      AND cache_creation_tokens = 0
      AND is_claude_style = 1

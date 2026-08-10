@@ -109,7 +109,9 @@ func SnapshotToEvents(env *SnapshotEnvelope) []storage.UsageEvent {
 					CacheReadTokens:     d.Tokens.CacheReadTokens,
 					CacheCreationTokens: d.Tokens.CacheCreationTokens,
 					TotalTokens:         d.Tokens.TotalTokens,
+					AccountingQuality:   "legacy",
 					Failed:              d.Failed,
+					Generate:            true,
 					InsertedAt:          now,
 				}
 				out = append(out, ev)
