@@ -103,25 +103,28 @@ export default function EventsPage() {
       className: "w-44",
       cellClassName: "whitespace-nowrap",
       cell: (r) => {
-        const d = r.timestamp ? new Date(r.timestamp) : null;
-        const ok = d && !Number.isNaN(d.getTime());
-        const date = ok ? `${String(d!.getMonth() + 1).padStart(2, "0")}-${String(d!.getDate()).padStart(2, "0")}` : "—";
-        const time = ok ? `${String(d!.getHours()).padStart(2, "0")}:${String(d!.getMinutes()).padStart(2, "0")}:${String(d!.getSeconds()).padStart(2, "0")}` : "";
+        const timestamp = formatTimestamp(r.timestamp);
+        const hasDetail = Boolean(r.request_id || !r.generate);
         return (
-          <div className="flex items-start gap-2" title={ok ? formatTimestamp(r.timestamp) : ""}>
+          <div className="flex items-start gap-2">
             <span
               title={r.failed ? `Failed${r.fail_status_code ? ` (${r.fail_status_code})` : ""}` : "Success"}
-              className={`mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full ${r.failed ? "bg-danger" : "bg-success"}`}
+              className={`mt-1 inline-block h-2 w-2 shrink-0 rounded-full ${r.failed ? "bg-danger" : "bg-success"}`}
             />
             <div className="min-w-0">
-              <div className="text-[10px] text-muted">{date}</div>
-              <div className="font-mono">{time}</div>
-              {r.request_id && (
-                <div className="max-w-36 truncate font-mono text-[10px] text-muted" title={r.request_id}>
-                  {r.request_id}
+              <time className="block font-mono" dateTime={r.timestamp} title={timestamp}>
+                {timestamp}
+              </time>
+              {hasDetail && (
+                <div className="flex max-w-40 items-center gap-1.5 text-[10px] text-muted">
+                  {r.request_id && (
+                    <span className="min-w-0 truncate font-mono" title={r.request_id}>
+                      {r.request_id}
+                    </span>
+                  )}
+                  {!r.generate && <span className="shrink-0 text-warn">result only</span>}
                 </div>
               )}
-              {!r.generate && <div className="text-[10px] text-warn">result only</div>}
             </div>
           </div>
         );
@@ -131,21 +134,14 @@ export default function EventsPage() {
       header: "Model / Provider",
       className: "w-52",
       cellClassName: "max-w-52",
-      cell: (r) => {
-        const tier = eventTier(r);
-        return (
-          <div className="min-w-0">
-            <div className="truncate font-mono" title={r.model}>{r.model || "—"}</div>
-            {r.alias && r.alias !== r.model && (
-              <div className="truncate text-[10px] text-muted" title={r.alias}>{r.alias}</div>
-            )}
-            <div className="mt-0.5 truncate text-[10px] text-muted" title={eventProvider(r)}>
-              {eventProvider(r)}
-            </div>
-            {tier && <div className="text-[10px] text-muted truncate">tier {tier}</div>}
+      cell: (r) => (
+        <div className="min-w-0">
+          <div className="truncate font-mono" title={r.model}>{r.model || "—"}</div>
+          <div className="truncate text-[10px] text-muted" title={eventProvider(r)}>
+            {eventProvider(r)}
           </div>
-        );
-      },
+        </div>
+      ),
     },
     {
       header: "API / Source",
@@ -154,10 +150,7 @@ export default function EventsPage() {
       cell: (r) => (
         <div className="min-w-0">
           <div className="truncate" title={r.api_group_key}>{r.api_group_display || r.api_group_key || "—"}</div>
-          {r.api_group_display && r.api_group_display !== r.api_group_key && (
-            <div className="text-[10px] text-muted font-mono truncate">{r.api_group_key}</div>
-          )}
-          <div className="mt-0.5 truncate text-[10px] text-muted" title={r.source}>
+          <div className="truncate text-[10px] text-muted" title={r.source}>
             {r.source_display || r.source || "—"}
             {r.auth_index && <span className="font-mono"> #{r.auth_index}</span>}
           </div>
@@ -336,7 +329,6 @@ function MobileEventList({
 
 function MobileEventCard({ event, onOpen }: { event: UsageEventRecord; onOpen: () => void }) {
   const canOpen = Boolean(event.request_id);
-  const tier = eventTier(event);
   const activate = () => {
     if (canOpen) onOpen();
   };
@@ -383,20 +375,13 @@ function MobileEventCard({ event, onOpen }: { event: UsageEventRecord; onOpen: (
         <div className="[overflow-wrap:anywhere] font-mono text-sm font-medium text-ink">
           {event.model || "—"}
         </div>
-        {event.alias && event.alias !== event.model && (
-          <div className="mt-0.5 truncate text-[11px] text-muted" title={event.alias}>{event.alias}</div>
-        )}
-        <div className="mt-1 truncate font-mono text-[10px] text-muted" title={event.request_id}>
+        <div className="mt-0.5 truncate font-mono text-[10px] text-muted" title={event.request_id}>
           {event.request_id || "No request id"}
         </div>
       </div>
 
       <dl className="mt-3 grid min-w-0 grid-cols-2 gap-x-3 gap-y-2 border-t border-border pt-3">
-        <MobileEventField
-          label="Provider"
-          value={eventProvider(event)}
-          detail={tier ? `tier ${tier}` : undefined}
-        />
+        <MobileEventField label="Provider" value={eventProvider(event)} />
         <MobileEventField
           label="Source"
           value={`${event.source_display || event.source || "—"}${event.auth_index ? ` #${event.auth_index}` : ""}`}
@@ -405,7 +390,6 @@ function MobileEventCard({ event, onOpen }: { event: UsageEventRecord; onOpen: (
         <MobileEventField
           label="API"
           value={event.api_group_display || event.api_group_key || "—"}
-          detail={event.api_group_display && event.api_group_display !== event.api_group_key ? event.api_group_key : undefined}
           title={event.api_group_key}
         />
         <MobileEventField label="Endpoint" value={event.endpoint || "—"} title={event.endpoint} mono />
@@ -433,13 +417,11 @@ function MobileEventCard({ event, onOpen }: { event: UsageEventRecord; onOpen: (
 function MobileEventField({
   label,
   value,
-  detail,
   title,
   mono = false,
 }: {
   label: string;
   value: string;
-  detail?: string;
   title?: string;
   mono?: boolean;
 }) {
@@ -449,7 +431,6 @@ function MobileEventField({
       <dd className={`mt-0.5 truncate text-[11px] text-ink ${mono ? "font-mono" : ""}`} title={title || value}>
         {value}
       </dd>
-      {detail && <dd className="truncate font-mono text-[9px] text-muted" title={detail}>{detail}</dd>}
     </div>
   );
 }
@@ -479,13 +460,6 @@ function MobileMetric({
 function eventProvider(event: UsageEventRecord): string {
   const values = [...new Set([event.provider, event.executor_type].filter(Boolean))];
   return values.length ? values.join(" · ") : "—";
-}
-
-function eventTier(event: UsageEventRecord): string {
-  const requestTier = event.service_tier || event.request_service_tier;
-  return event.response_service_tier
-    ? `${requestTier || "default"} → ${event.response_service_tier}`
-    : requestTier;
 }
 
 function eventInputTokens(event: UsageEventRecord): number {
