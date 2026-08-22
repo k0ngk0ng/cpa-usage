@@ -37,7 +37,10 @@ func Open(cfg Config) (*Store, error) {
 			return nil, fmt.Errorf("ensure sqlite dir: %w", err)
 		}
 	}
-	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=synchronous(NORMAL)", cfg.Path)
+	// mmap_size(256MB) and cache_size(-64000 = 64MB) let the wide overview
+	// GROUP BYs stay in memory across the parallel queries instead of hammering
+	// the page cache on every 30d scan.
+	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=synchronous(NORMAL)&_pragma=mmap_size(268435456)&_pragma=cache_size(-64000)", cfg.Path)
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger:                                   logger.Default.LogMode(logger.Silent),
 		DisableForeignKeyConstraintWhenMigrating: true,

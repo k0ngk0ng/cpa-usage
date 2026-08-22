@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/errgroup"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -563,31 +564,93 @@ func costFromTotals(model string, input, output, cacheRead, cacheWrite int64, pr
 	return computeCost(model, input, output, cacheRead, cacheWrite, prices)
 }
 
-// BuildUsageOverview returns the summary, hourly+daily series and a range-sized 15-minute health grid.
+// BuildUsageOverview returns the summary and hourly/daily/weekly/monthly series.
+// The five aggregations are independent SELECTs, so we run them concurrently —
+// SQLite WAL mode lets multiple readers proceed in parallel.
 func (s *Store) BuildUsageOverview(ctx context.Context, f storage.UsageFilter, prices map[string]storage.ModelPriceSetting) (*storage.UsageOverview, error) {
 	now := time.Now().UTC()
 
-	// Summary aggregation
-	type sumRow struct {
-		Model               string
-		Provider            string
-		ExecutorType        string
-		AccountingVersion   int
-		AccountingQuality   string
-		Total               int64
-		Success             int64
-		Failed              int64
-		InputTokens         int64
-		OutputTokens        int64
-		ReasoningTokens     int64
-		CachedTokens        int64
-		CacheReadTokens     int64
-		CacheCreationTokens int64
-		NonReasoningTokens  int64
-		UnclassifiedTokens  int64
-		TotalTokens         int64
+	var (
+		summary                        storage.UsageSummary
+		hourly, daily, weekly, monthly []storage.UsageBucket
+	)
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		out, err := s.computeSummary(gctx, f, prices)
+		if err != nil {
+			return err
+		}
+		summary = out
+		return nil
+	})
+	g.Go(func() error {
+		out, err := s.bucketSeriesHourly(gctx, f, now, prices)
+		if err != nil {
+			return err
+		}
+		hourly = out
+		return nil
+	})
+	g.Go(func() error {
+		out, err := s.bucketSeriesDaily(gctx, f, now, prices)
+		if err != nil {
+			return err
+		}
+		daily = out
+		return nil
+	})
+	g.Go(func() error {
+		out, err := s.bucketSeriesWeekly(gctx, f, now, prices)
+		if err != nil {
+			return err
+		}
+		weekly = out
+		return nil
+	})
+	g.Go(func() error {
+		out, err := s.bucketSeriesMonthly(gctx, f, now, prices)
+		if err != nil {
+			return err
+		}
+		monthly = out
+		return nil
+	})
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
-	var sumRows []sumRow
+
+	return &storage.UsageOverview{
+		Summary:       summary,
+		HourlySeries:  hourly,
+		DailySeries:   daily,
+		WeeklySeries:  weekly,
+		MonthlySeries: monthly,
+		GeneratedAt:   now,
+	}, nil
+}
+
+type summaryRow struct {
+	Model               string
+	Provider            string
+	ExecutorType        string
+	AccountingVersion   int
+	AccountingQuality   string
+	Total               int64
+	Success             int64
+	Failed              int64
+	InputTokens         int64
+	OutputTokens        int64
+	ReasoningTokens     int64
+	CachedTokens        int64
+	CacheReadTokens     int64
+	CacheCreationTokens int64
+	NonReasoningTokens  int64
+	UnclassifiedTokens  int64
+	TotalTokens         int64
+}
+
+func (s *Store) computeSummary(ctx context.Context, f storage.UsageFilter, prices map[string]storage.ModelPriceSetting) (storage.UsageSummary, error) {
+	var rows []summaryRow
 	if err := s.applyFilter(ctx, f).
 		Select(`model, provider, executor_type, accounting_version, accounting_quality,
 			COUNT(*) AS total,
@@ -603,11 +666,11 @@ func (s *Store) BuildUsageOverview(ctx context.Context, f storage.UsageFilter, p
 			SUM(unclassified_tokens) AS unclassified_tokens,
 			SUM(total_tokens) AS total_tokens`).
 		Group("model, provider, executor_type, accounting_version, accounting_quality").
-		Scan(&sumRows).Error; err != nil {
-		return nil, err
+		Scan(&rows).Error; err != nil {
+		return storage.UsageSummary{}, err
 	}
 	summary := storage.UsageSummary{}
-	for _, row := range sumRows {
+	for _, row := range rows {
 		outputTokens := tokenusage.OutputTotal(row.AccountingVersion, row.AccountingQuality, row.Provider, row.ExecutorType, row.OutputTokens, row.ReasoningTokens)
 		nonReasoningTokens := row.NonReasoningTokens
 		if !tokenusage.IsCanonicalV2(row.AccountingVersion, row.AccountingQuality) {
@@ -627,39 +690,7 @@ func (s *Store) BuildUsageOverview(ctx context.Context, f storage.UsageFilter, p
 		summary.TotalTokens += row.TotalTokens
 		summary.Cost += computeCost(row.Model, row.InputTokens, outputTokens, row.CachedTokens, row.CacheCreationTokens, prices)
 	}
-
-	// Hourly (last 24h) + daily (last 7d) + weekly (last 12w) + monthly (last 12mo)
-	// series via SQL bucketing using strftime.
-	hourly, err := s.bucketSeriesHourly(ctx, f, now, prices)
-	if err != nil {
-		return nil, err
-	}
-	daily, err := s.bucketSeriesDaily(ctx, f, now, prices)
-	if err != nil {
-		return nil, err
-	}
-	weekly, err := s.bucketSeriesWeekly(ctx, f, now, prices)
-	if err != nil {
-		return nil, err
-	}
-	monthly, err := s.bucketSeriesMonthly(ctx, f, now, prices)
-	if err != nil {
-		return nil, err
-	}
-	health, err := s.healthGrid(ctx, f, now)
-	if err != nil {
-		return nil, err
-	}
-
-	return &storage.UsageOverview{
-		Summary:       summary,
-		HourlySeries:  hourly,
-		DailySeries:   daily,
-		WeeklySeries:  weekly,
-		MonthlySeries: monthly,
-		HealthGrid:    health,
-		GeneratedAt:   now,
-	}, nil
+	return summary, nil
 }
 
 // bucketRow is one (bucket, model) aggregate read from a strftime GROUP BY.
@@ -825,22 +856,6 @@ func (s *Store) bucketSeriesMonthly(ctx context.Context, f storage.UsageFilter, 
 	return foldBucketsMonthly(rows, monthlyFilter.Start, monthlyFilter.End, prices), nil
 }
 
-func (s *Store) healthGrid(ctx context.Context, f storage.UsageFilter, now time.Time) ([][]storage.HealthCell, error) {
-	healthFilter := f
-	end := startOfDay(now).Add(24 * time.Hour)
-	if healthFilter.HasRange() {
-		healthFilter.Start = startOfDay(healthFilter.Start)
-		healthFilter.End = startOfDay(healthFilter.End.Add(-time.Nanosecond)).Add(24 * time.Hour)
-		if healthFilter.End.Sub(healthFilter.Start) > 30*24*time.Hour {
-			healthFilter.Start = healthFilter.End.Add(-30 * 24 * time.Hour)
-		}
-	} else {
-		healthFilter.End = end
-		healthFilter.Start = end.Add(-30 * 24 * time.Hour)
-	}
-	return s.healthGridRange(ctx, healthFilter)
-}
-
 func (s *Store) BuildUsageHealthDays(ctx context.Context, f storage.UsageFilter, start, end time.Time) ([]storage.UsageHealthDay, error) {
 	healthFilter := f
 	healthFilter.Start = start
@@ -907,51 +922,6 @@ func (s *Store) ListUsageEventYears(ctx context.Context, f storage.UsageFilter) 
 		out = append(out, storage.UsageHealthYear{Year: r.Year, Total: r.Total})
 	}
 	return out, nil
-}
-
-func (s *Store) healthGridRange(ctx context.Context, healthFilter storage.UsageFilter) ([][]storage.HealthCell, error) {
-	type row struct {
-		Bucket string
-		Total  int64
-		Failed int64
-	}
-	var rows []row
-	if err := s.applyFilter(ctx, healthFilter).
-		Select(`strftime('%Y-%m-%d %H:%M', datetime((strftime('%s', timestamp) / 900) * 900, 'unixepoch')) AS bucket,
-			COUNT(*) AS total,
-			SUM(CASE WHEN failed = 1 THEN 1 ELSE 0 END) AS failed`).
-		Group("bucket").
-		Scan(&rows).Error; err != nil {
-		return nil, err
-	}
-	bucketMap := make(map[time.Time]storage.HealthCell, len(rows))
-	for _, r := range rows {
-		t, err := time.Parse("2006-01-02 15:04", r.Bucket)
-		if err != nil {
-			continue
-		}
-		bucketMap[t.UTC()] = storage.HealthCell{Bucket: t.UTC(), Total: r.Total, Failed: r.Failed}
-	}
-
-	days := int(healthFilter.End.Sub(healthFilter.Start).Hours() / 24)
-	if days < 1 {
-		days = 1
-	}
-	grid := make([][]storage.HealthCell, days)
-	for d := 0; d < days; d++ {
-		row := make([]storage.HealthCell, 96)
-		dayStart := healthFilter.Start.Add(time.Duration(d) * 24 * time.Hour)
-		for c := 0; c < 96; c++ {
-			b := dayStart.Add(time.Duration(c) * 15 * time.Minute).UTC()
-			if cell, ok := bucketMap[b]; ok {
-				row[c] = cell
-			} else {
-				row[c] = storage.HealthCell{Bucket: b}
-			}
-		}
-		grid[d] = row
-	}
-	return grid, nil
 }
 
 func (s *Store) healthDetailRange(ctx context.Context, healthFilter storage.UsageFilter) ([][]storage.HealthCell, error) {
