@@ -565,10 +565,51 @@ func costFromTotals(model string, input, output, cacheRead, cacheWrite int64, pr
 }
 
 // BuildUsageOverview returns the summary and hourly/daily/weekly/monthly series.
-// The five aggregations are independent SELECTs, so we run them concurrently —
-// SQLite WAL mode lets multiple readers proceed in parallel.
+// Unbounded views use independent SELECTs concurrently. Bounded views share
+// the daily aggregate for the summary and wider rollups (see below), avoiding
+// repeated scans of the same requested window.
 func (s *Store) BuildUsageOverview(ctx context.Context, f storage.UsageFilter, prices map[string]storage.ModelPriceSetting) (*storage.UsageOverview, error) {
 	now := time.Now().UTC()
+
+	// A bounded overview (in particular the 30d view) already has a daily
+	// aggregate covering the complete requested window.  Re-running that same
+	// scan for summary, weekly, and monthly output is needlessly expensive on
+	// large installations.  Keep the hourly query (it has a different, tighter
+	// window), derive the other rollups from the daily buckets, and derive the
+	// summary from those same buckets.  This reduces a wide overview from five
+	// table scans to two without changing any filter or accounting semantics.
+	if f.HasRange() && f.End.After(f.Start) {
+		var hourly, daily []storage.UsageBucket
+		g, gctx := errgroup.WithContext(ctx)
+		g.Go(func() error {
+			out, err := s.bucketSeriesHourly(gctx, f, now, prices)
+			if err != nil {
+				return err
+			}
+			hourly = out
+			return nil
+		})
+		g.Go(func() error {
+			out, err := s.bucketSeriesDaily(gctx, f, now, prices)
+			if err != nil {
+				return err
+			}
+			daily = out
+			return nil
+		})
+		if err := g.Wait(); err != nil {
+			return nil, err
+		}
+
+		return &storage.UsageOverview{
+			Summary:       summarizeBuckets(daily),
+			HourlySeries:  hourly,
+			DailySeries:   daily,
+			WeeklySeries:  rollupDailyBuckets(daily, f.Start, f.End, rollupWeekly),
+			MonthlySeries: rollupDailyBuckets(daily, f.Start, f.End, rollupMonthly),
+			GeneratedAt:   now,
+		}, nil
+	}
 
 	var (
 		summary                        storage.UsageSummary
@@ -627,6 +668,111 @@ func (s *Store) BuildUsageOverview(ctx context.Context, f storage.UsageFilter, p
 		MonthlySeries: monthly,
 		GeneratedAt:   now,
 	}, nil
+}
+
+// summarizeBuckets folds already-aggregated daily buckets into the summary
+// shape.  Daily folding has already applied provider-aware output accounting
+// and model pricing, so this is equivalent to a second SQL aggregate while
+// avoiding another pass over usage_events.
+func summarizeBuckets(buckets []storage.UsageBucket) storage.UsageSummary {
+	var out storage.UsageSummary
+	for _, b := range buckets {
+		out.Total += b.Total
+		out.Success += b.Success
+		out.Failed += b.Failed
+		out.InputTokens += b.InputTokens
+		out.OutputTokens += b.OutputTokens
+		out.ReasoningTokens += b.ReasoningTokens
+		out.CachedTokens += b.CachedTokens
+		out.CacheReadTokens += b.CacheReadTokens
+		out.CacheCreationTokens += b.CacheCreationTokens
+		out.NonReasoningTokens += b.NonReasoningTokens
+		out.UnclassifiedTokens += b.UnclassifiedTokens
+		out.TotalTokens += b.TotalTokens
+		out.Cost += b.Cost
+	}
+	return out
+}
+
+type rollupGranularity uint8
+
+const (
+	rollupWeekly rollupGranularity = iota
+	rollupMonthly
+)
+
+// rollupDailyBuckets derives weekly/monthly series from the daily aggregate.
+// The SQL implementations group raw rows by a more expensive datetime
+// expression; grouping at most a few dozen (or a few thousand custom-range)
+// daily buckets in Go is both exact and substantially cheaper.  The effective
+// windows match bucketSeriesWeekly/bucketSeriesMonthly, including their caps.
+func rollupDailyBuckets(daily []storage.UsageBucket, start, end time.Time, granularity rollupGranularity) []storage.UsageBucket {
+	if !end.After(start) {
+		return nil
+	}
+	windowStart := start
+	if granularity == rollupWeekly {
+		if end.Sub(windowStart) > weeklyMaxWindow {
+			windowStart = end.Add(-weeklyMaxWindow)
+		}
+	} else if maxStart := end.AddDate(0, -monthlyMaxMonths, 0); windowStart.Before(maxStart) {
+		windowStart = maxStart
+	}
+
+	merged := make(map[string]*storage.UsageBucket)
+	for _, day := range daily {
+		var bucket time.Time
+		if granularity == rollupWeekly {
+			bucket = startOfWeekLocal(day.Bucket)
+		} else {
+			bucket = startOfMonthLocal(day.Bucket)
+		}
+		key := bucket.Format("2006-01-02")
+		out, ok := merged[key]
+		if !ok {
+			out = &storage.UsageBucket{Bucket: bucket}
+			merged[key] = out
+		}
+		mergeUsageBuckets(out, day)
+	}
+
+	result := make([]storage.UsageBucket, 0)
+	if granularity == rollupWeekly {
+		for bucket := startOfWeekLocal(windowStart); bucket.Before(end); bucket = bucket.AddDate(0, 0, 7) {
+			key := bucket.Format("2006-01-02")
+			if out, ok := merged[key]; ok {
+				result = append(result, *out)
+			} else {
+				result = append(result, storage.UsageBucket{Bucket: bucket})
+			}
+		}
+		return result
+	}
+	for bucket := startOfMonthLocal(windowStart); bucket.Before(end); bucket = bucket.AddDate(0, 1, 0) {
+		key := bucket.Format("2006-01-02")
+		if out, ok := merged[key]; ok {
+			result = append(result, *out)
+		} else {
+			result = append(result, storage.UsageBucket{Bucket: bucket})
+		}
+	}
+	return result
+}
+
+func mergeUsageBuckets(dst *storage.UsageBucket, src storage.UsageBucket) {
+	dst.Total += src.Total
+	dst.Success += src.Success
+	dst.Failed += src.Failed
+	dst.InputTokens += src.InputTokens
+	dst.OutputTokens += src.OutputTokens
+	dst.ReasoningTokens += src.ReasoningTokens
+	dst.CachedTokens += src.CachedTokens
+	dst.CacheReadTokens += src.CacheReadTokens
+	dst.CacheCreationTokens += src.CacheCreationTokens
+	dst.NonReasoningTokens += src.NonReasoningTokens
+	dst.UnclassifiedTokens += src.UnclassifiedTokens
+	dst.TotalTokens += src.TotalTokens
+	dst.Cost += src.Cost
 }
 
 type summaryRow struct {
