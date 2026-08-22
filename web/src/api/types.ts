@@ -84,6 +84,8 @@ export interface UsageOverview {
   summary: UsageSummary;
   hourly_series: UsageBucket[];
   daily_series: UsageBucket[];
+  weekly_series: UsageBucket[];
+  monthly_series: UsageBucket[];
   health_grid: HealthCell[][];
   generated_at: string;
 }

@@ -628,12 +628,21 @@ func (s *Store) BuildUsageOverview(ctx context.Context, f storage.UsageFilter, p
 		summary.Cost += computeCost(row.Model, row.InputTokens, outputTokens, row.CachedTokens, row.CacheCreationTokens, prices)
 	}
 
-	// Hourly (last 24h) + daily (last 7d) series via SQL bucketing using strftime.
+	// Hourly (last 24h) + daily (last 7d) + weekly (last 12w) + monthly (last 12mo)
+	// series via SQL bucketing using strftime.
 	hourly, err := s.bucketSeriesHourly(ctx, f, now, prices)
 	if err != nil {
 		return nil, err
 	}
 	daily, err := s.bucketSeriesDaily(ctx, f, now, prices)
+	if err != nil {
+		return nil, err
+	}
+	weekly, err := s.bucketSeriesWeekly(ctx, f, now, prices)
+	if err != nil {
+		return nil, err
+	}
+	monthly, err := s.bucketSeriesMonthly(ctx, f, now, prices)
 	if err != nil {
 		return nil, err
 	}
@@ -643,11 +652,13 @@ func (s *Store) BuildUsageOverview(ctx context.Context, f storage.UsageFilter, p
 	}
 
 	return &storage.UsageOverview{
-		Summary:      summary,
-		HourlySeries: hourly,
-		DailySeries:  daily,
-		HealthGrid:   health,
-		GeneratedAt:  now,
+		Summary:       summary,
+		HourlySeries:  hourly,
+		DailySeries:   daily,
+		WeeklySeries:  weekly,
+		MonthlySeries: monthly,
+		HealthGrid:    health,
+		GeneratedAt:   now,
 	}, nil
 }
 
@@ -730,6 +741,70 @@ func (s *Store) bucketSeriesDaily(ctx context.Context, f storage.UsageFilter, no
 		return nil, err
 	}
 	return foldBucketsDaily(rows, dailyFilter.Start, dailyFilter.End, prices), nil
+}
+
+// bucketSeriesWeekly buckets by ISO-week start (Monday, local time).
+func (s *Store) bucketSeriesWeekly(ctx context.Context, f storage.UsageFilter, now time.Time, prices map[string]storage.ModelPriceSetting) ([]storage.UsageBucket, error) {
+	weeklyFilter := f
+	if weeklyFilter.Start.IsZero() || weeklyFilter.End.IsZero() {
+		end := startOfWeekLocal(now).AddDate(0, 0, 7)
+		weeklyFilter.End = end
+		weeklyFilter.Start = end.AddDate(0, 0, -12*7)
+	}
+	var rows []bucketRow
+	// Move each timestamp back to that week's Monday (localtime) by subtracting
+	// ((weekday+6) % 7) days, where SQLite's %w is 0=Sunday…6=Saturday.
+	if err := s.applyFilter(ctx, weeklyFilter).
+		Select(`strftime('%Y-%m-%d', datetime(timestamp, 'localtime', '-' || ((cast(strftime('%w', timestamp, 'localtime') as integer) + 6) % 7) || ' days')) AS bucket,
+			model, provider, executor_type, accounting_version, accounting_quality,
+			COUNT(*) AS total,
+			SUM(CASE WHEN failed = 0 THEN 1 ELSE 0 END) AS success,
+			SUM(CASE WHEN failed = 1 THEN 1 ELSE 0 END) AS failed,
+			SUM(input_tokens) AS input_tokens,
+			SUM(output_tokens) AS output_tokens,
+			SUM(reasoning_tokens) AS reasoning_tokens,
+			SUM(cached_tokens) AS cached_tokens,
+			SUM(cache_read_tokens) AS cache_read_tokens,
+			SUM(cache_creation_tokens) AS cache_creation_tokens,
+			SUM(non_reasoning_tokens) AS non_reasoning_tokens,
+			SUM(unclassified_tokens) AS unclassified_tokens,
+			SUM(total_tokens) AS total_tokens`).
+		Group("bucket, model, provider, executor_type, accounting_version, accounting_quality").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return foldBucketsWeekly(rows, weeklyFilter.Start, weeklyFilter.End, prices), nil
+}
+
+// bucketSeriesMonthly buckets by first-of-month (local time).
+func (s *Store) bucketSeriesMonthly(ctx context.Context, f storage.UsageFilter, now time.Time, prices map[string]storage.ModelPriceSetting) ([]storage.UsageBucket, error) {
+	monthlyFilter := f
+	if monthlyFilter.Start.IsZero() || monthlyFilter.End.IsZero() {
+		end := startOfMonthLocal(now).AddDate(0, 1, 0)
+		monthlyFilter.End = end
+		monthlyFilter.Start = end.AddDate(0, -12, 0)
+	}
+	var rows []bucketRow
+	if err := s.applyFilter(ctx, monthlyFilter).
+		Select(`strftime('%Y-%m-01', timestamp, 'localtime') AS bucket,
+			model, provider, executor_type, accounting_version, accounting_quality,
+			COUNT(*) AS total,
+			SUM(CASE WHEN failed = 0 THEN 1 ELSE 0 END) AS success,
+			SUM(CASE WHEN failed = 1 THEN 1 ELSE 0 END) AS failed,
+			SUM(input_tokens) AS input_tokens,
+			SUM(output_tokens) AS output_tokens,
+			SUM(reasoning_tokens) AS reasoning_tokens,
+			SUM(cached_tokens) AS cached_tokens,
+			SUM(cache_read_tokens) AS cache_read_tokens,
+			SUM(cache_creation_tokens) AS cache_creation_tokens,
+			SUM(non_reasoning_tokens) AS non_reasoning_tokens,
+			SUM(unclassified_tokens) AS unclassified_tokens,
+			SUM(total_tokens) AS total_tokens`).
+		Group("bucket, model, provider, executor_type, accounting_version, accounting_quality").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return foldBucketsMonthly(rows, monthlyFilter.Start, monthlyFilter.End, prices), nil
 }
 
 func (s *Store) healthGrid(ctx context.Context, f storage.UsageFilter, now time.Time) ([][]storage.HealthCell, error) {
@@ -989,6 +1064,79 @@ func foldBucketsDaily(rows []bucketRow, start, end time.Time, prices map[string]
 	return out
 }
 
+func foldBucketsWeekly(rows []bucketRow, start, end time.Time, prices map[string]storage.ModelPriceSetting) []storage.UsageBucket {
+	merged := make(map[string]*storage.UsageBucket)
+	for _, r := range rows {
+		t, err := time.ParseInLocation("2006-01-02", r.Bucket, time.Local)
+		if err != nil {
+			continue
+		}
+		b, ok := merged[r.Bucket]
+		if !ok {
+			b = &storage.UsageBucket{Bucket: t}
+			merged[r.Bucket] = b
+		}
+		accumulate(b, r, prices)
+	}
+	out := make([]storage.UsageBucket, 0)
+	for d := startOfWeekLocal(start); d.Before(end); d = d.AddDate(0, 0, 7) {
+		key := d.Format("2006-01-02")
+		if b, ok := merged[key]; ok {
+			out = append(out, *b)
+		} else {
+			out = append(out, storage.UsageBucket{Bucket: d})
+		}
+	}
+	return out
+}
+
+func foldBucketsMonthly(rows []bucketRow, start, end time.Time, prices map[string]storage.ModelPriceSetting) []storage.UsageBucket {
+	merged := make(map[string]*storage.UsageBucket)
+	for _, r := range rows {
+		t, err := time.ParseInLocation("2006-01-02", r.Bucket, time.Local)
+		if err != nil {
+			continue
+		}
+		b, ok := merged[r.Bucket]
+		if !ok {
+			b = &storage.UsageBucket{Bucket: t}
+			merged[r.Bucket] = b
+		}
+		accumulate(b, r, prices)
+	}
+	out := make([]storage.UsageBucket, 0)
+	for d := startOfMonthLocal(start); d.Before(end); d = d.AddDate(0, 1, 0) {
+		key := d.Format("2006-01-02")
+		if b, ok := merged[key]; ok {
+			out = append(out, *b)
+		} else {
+			out = append(out, storage.UsageBucket{Bucket: d})
+		}
+	}
+	return out
+}
+
+func accumulate(b *storage.UsageBucket, r bucketRow, prices map[string]storage.ModelPriceSetting) {
+	outputTokens := tokenusage.OutputTotal(r.AccountingVersion, r.AccountingQuality, r.Provider, r.ExecutorType, r.OutputTokens, r.ReasoningTokens)
+	nonReasoningTokens := r.NonReasoningTokens
+	if !tokenusage.IsCanonicalV2(r.AccountingVersion, r.AccountingQuality) {
+		nonReasoningTokens = tokenusage.LegacyNonReasoning(r.Provider, r.ExecutorType, r.OutputTokens, r.ReasoningTokens)
+	}
+	b.Total += r.Total
+	b.Success += r.Success
+	b.Failed += r.Failed
+	b.InputTokens += r.InputTokens
+	b.OutputTokens += outputTokens
+	b.ReasoningTokens += r.ReasoningTokens
+	b.CachedTokens += r.CachedTokens
+	b.CacheReadTokens += r.CacheReadTokens
+	b.CacheCreationTokens += r.CacheCreationTokens
+	b.NonReasoningTokens += nonReasoningTokens
+	b.UnclassifiedTokens += r.UnclassifiedTokens
+	b.TotalTokens += r.TotalTokens
+	b.Cost += computeCost(r.Model, r.InputTokens, outputTokens, r.CachedTokens, r.CacheCreationTokens, prices)
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if value = strings.TrimSpace(value); value != "" {
@@ -1005,6 +1153,18 @@ func startOfDay(t time.Time) time.Time {
 func startOfDayLocal(t time.Time) time.Time {
 	local := t.In(time.Local)
 	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.Local)
+}
+
+func startOfWeekLocal(t time.Time) time.Time {
+	local := t.In(time.Local)
+	// Weekday(): Sunday=0…Saturday=6. Convert to Monday-based offset.
+	offset := (int(local.Weekday()) + 6) % 7
+	return time.Date(local.Year(), local.Month(), local.Day()-offset, 0, 0, 0, 0, time.Local)
+}
+
+func startOfMonthLocal(t time.Time) time.Time {
+	local := t.In(time.Local)
+	return time.Date(local.Year(), local.Month(), 1, 0, 0, 0, 0, time.Local)
 }
 
 func pageSizeAllowed(size int) bool {

@@ -246,11 +246,13 @@ type UsageAggregationRow struct {
 
 // UsageOverview is the response of /usage/overview.
 type UsageOverview struct {
-	Summary      UsageSummary   `json:"summary"`
-	HourlySeries []UsageBucket  `json:"hourly_series"`
-	DailySeries  []UsageBucket  `json:"daily_series"`
-	HealthGrid   [][]HealthCell `json:"health_grid"`
-	GeneratedAt  time.Time      `json:"generated_at"`
+	Summary       UsageSummary   `json:"summary"`
+	HourlySeries  []UsageBucket  `json:"hourly_series"`
+	DailySeries   []UsageBucket  `json:"daily_series"`
+	WeeklySeries  []UsageBucket  `json:"weekly_series"`
+	MonthlySeries []UsageBucket  `json:"monthly_series"`
+	HealthGrid    [][]HealthCell `json:"health_grid"`
+	GeneratedAt   time.Time      `json:"generated_at"`
 }
 
 // UsageHealthYear is one year option available for the request matrix.

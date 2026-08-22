@@ -1,13 +1,73 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import FilterBar from "../components/FilterBar";
 import HealthGrid from "../components/HealthGrid";
 import MetricCard from "../components/MetricCard";
-import SeriesChart from "../components/SeriesChart";
+import SeriesChart, { type SeriesGranularity } from "../components/SeriesChart";
 import { api } from "../api/client";
 import { todayFilter, useFilter } from "../hooks/useFilter";
 import { useRefreshTick } from "../lib/refresh";
 import { formatCost, formatNumber, formatTokens, pct } from "../lib/utils";
-import type { UsageHealthMatrix, UsageOverview } from "../api/types";
+import type { UsageBucket, UsageHealthMatrix, UsageOverview } from "../api/types";
+
+const GRANULARITIES: { key: SeriesGranularity; label: string }[] = [
+  { key: "hourly", label: "Hourly" },
+  { key: "daily", label: "Daily" },
+  { key: "weekly", label: "Weekly" },
+  { key: "monthly", label: "Monthly" },
+];
+
+function defaultGranularity(range: string): SeriesGranularity {
+  if (range === "30d") return "daily";
+  if (range === "all") return "weekly";
+  if (range === "7d") return "daily";
+  return "hourly";
+}
+
+function titleFor(g: SeriesGranularity): string {
+  return GRANULARITIES.find((x) => x.key === g)?.label ?? "Hourly";
+}
+
+function GranularityToggle({
+  value,
+  onChange,
+}: {
+  value: SeriesGranularity;
+  onChange: (g: SeriesGranularity) => void;
+}) {
+  return (
+    <div className="inline-flex rounded-md border border-border overflow-hidden text-xs">
+      {GRANULARITIES.map((g) => {
+        const active = g.key === value;
+        return (
+          <button
+            key={g.key}
+            type="button"
+            onClick={() => onChange(g.key)}
+            className={`px-2 py-1 transition-colors ${
+              active ? "bg-accent/20 text-accent" : "bg-panel text-muted hover:text-fg"
+            }`}
+          >
+            {g.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function seriesFor(data: UsageOverview | null, g: SeriesGranularity): UsageBucket[] {
+  if (!data) return [];
+  switch (g) {
+    case "monthly":
+      return data.monthly_series || [];
+    case "weekly":
+      return data.weekly_series || [];
+    case "daily":
+      return data.daily_series || [];
+    default:
+      return data.hourly_series || [];
+  }
+}
 
 export default function Overview() {
   const { filter, setFilter } = useFilter(todayFilter);
@@ -71,8 +131,19 @@ export default function Overview() {
   ]);
 
   const summary = data?.summary;
-  const useDaily = filter.range === "7d" || filter.range === "30d" || filter.range === "all";
-  const series = useDaily ? data?.daily_series || [] : data?.hourly_series || [];
+  const suggested = useMemo(() => defaultGranularity(filter.range), [filter.range]);
+  const [requestsGranularity, setRequestsGranularity] = useState<SeriesGranularity>(suggested);
+  const [tokensGranularity, setTokensGranularity] = useState<SeriesGranularity>(suggested);
+  const [requestsGranTouched, setRequestsGranTouched] = useState(false);
+  const [tokensGranTouched, setTokensGranTouched] = useState(false);
+
+  useEffect(() => {
+    if (!requestsGranTouched) setRequestsGranularity(suggested);
+    if (!tokensGranTouched) setTokensGranularity(suggested);
+  }, [suggested, requestsGranTouched, tokensGranTouched]);
+
+  const requestsSeries = seriesFor(data, requestsGranularity);
+  const tokensSeries = seriesFor(data, tokensGranularity);
 
   return (
     <div>
@@ -138,27 +209,45 @@ export default function Overview() {
       <div className="space-y-6">
         <div className="grid gap-6 xl:grid-cols-2">
           <div>
-            <h2 className="text-sm uppercase tracking-wider text-muted mb-2">
-              {useDaily ? "Daily upstream calls" : "Hourly upstream calls"}
-            </h2>
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-sm uppercase tracking-wider text-muted">
+                {titleFor(requestsGranularity)} upstream calls
+              </h2>
+              <GranularityToggle
+                value={requestsGranularity}
+                onChange={(g) => {
+                  setRequestsGranularity(g);
+                  setRequestsGranTouched(true);
+                }}
+              />
+            </div>
             {loading && !data ? (
               <div className="bg-panel border border-border rounded-lg p-8 text-center text-muted text-sm">
                 Loading…
               </div>
             ) : (
-              <SeriesChart data={series} granularity={useDaily ? "daily" : "hourly"} />
+              <SeriesChart data={requestsSeries} granularity={requestsGranularity} />
             )}
           </div>
           <div>
-            <h2 className="text-sm uppercase tracking-wider text-muted mb-2">
-              {useDaily ? "Daily tokens" : "Hourly tokens"}
-            </h2>
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-sm uppercase tracking-wider text-muted">
+                {titleFor(tokensGranularity)} tokens
+              </h2>
+              <GranularityToggle
+                value={tokensGranularity}
+                onChange={(g) => {
+                  setTokensGranularity(g);
+                  setTokensGranTouched(true);
+                }}
+              />
+            </div>
             {loading && !data ? (
               <div className="bg-panel border border-border rounded-lg p-8 text-center text-muted text-sm">
                 Loading…
               </div>
             ) : (
-              <SeriesChart data={series} granularity={useDaily ? "daily" : "hourly"} mode="tokens" />
+              <SeriesChart data={tokensSeries} granularity={tokensGranularity} mode="tokens" />
             )}
           </div>
         </div>

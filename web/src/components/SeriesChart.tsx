@@ -11,9 +11,11 @@ import {
 import type { UsageBucket } from "../api/types";
 import { formatNumber, formatTimestamp } from "../lib/utils";
 
+export type SeriesGranularity = "hourly" | "daily" | "weekly" | "monthly";
+
 interface Props {
   data: UsageBucket[];
-  granularity: "hourly" | "daily";
+  granularity: SeriesGranularity;
   mode?: "requests" | "tokens";
   height?: number;
 }
@@ -38,7 +40,10 @@ export default function SeriesChart({ data, granularity, mode = "requests", heig
   const labelFor = (iso: string) => {
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return iso;
-    if (granularity === "daily") {
+    if (granularity === "monthly") {
+      return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+    }
+    if (granularity === "weekly" || granularity === "daily") {
       return `${d.getMonth() + 1}/${d.getDate()}`;
     }
     return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -97,7 +102,7 @@ export default function SeriesChart({ data, granularity, mode = "requests", heig
             }}
             labelFormatter={(_lbl, payload) => {
               const p = payload?.[0]?.payload as { bucket?: string } | undefined;
-              return formatTimestamp(p?.bucket);
+              return tooltipLabel(p?.bucket, granularity);
             }}
             formatter={(value) => formatNumber(Number(value))}
           />
@@ -121,4 +126,23 @@ export default function SeriesChart({ data, granularity, mode = "requests", heig
 
 function gradientID(mode: string, key: string): string {
   return `g-${mode}-${key.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+}
+
+function tooltipLabel(iso: string | undefined, granularity: SeriesGranularity): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const Y = d.getFullYear();
+  const M = String(d.getMonth() + 1).padStart(2, "0");
+  const D = String(d.getDate()).padStart(2, "0");
+  if (granularity === "monthly") return `${Y}-${M}`;
+  if (granularity === "weekly") {
+    const endMs = d.getTime() + 6 * 24 * 60 * 60 * 1000;
+    const e = new Date(endMs);
+    const eM = String(e.getMonth() + 1).padStart(2, "0");
+    const eD = String(e.getDate()).padStart(2, "0");
+    return `${Y}-${M}-${D} → ${e.getFullYear()}-${eM}-${eD}`;
+  }
+  if (granularity === "daily") return `${Y}-${M}-${D}`;
+  return formatTimestamp(iso);
 }
