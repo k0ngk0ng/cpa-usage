@@ -684,11 +684,23 @@ type bucketRow struct {
 	TotalTokens         int64
 }
 
+// Series windows are capped so a wide filter (e.g. 30d) does not force
+// hourly buckets over 720 hours × N group keys — the chart cannot render
+// that many points usefully and the GROUP BY dominates 30d overview latency.
+const (
+	hourlyMaxWindow  = 7 * 24 * time.Hour
+	weeklyMaxWindow  = 26 * 7 * 24 * time.Hour
+	monthlyMaxMonths = 12
+)
+
 func (s *Store) bucketSeriesHourly(ctx context.Context, f storage.UsageFilter, now time.Time, prices map[string]storage.ModelPriceSetting) ([]storage.UsageBucket, error) {
 	hourlyFilter := f
 	if hourlyFilter.Start.IsZero() || hourlyFilter.End.IsZero() {
 		hourlyFilter.End = now
 		hourlyFilter.Start = now.Add(-24 * time.Hour)
+	}
+	if hourlyFilter.End.Sub(hourlyFilter.Start) > hourlyMaxWindow {
+		hourlyFilter.Start = hourlyFilter.End.Add(-hourlyMaxWindow)
 	}
 	var rows []bucketRow
 	if err := s.applyFilter(ctx, hourlyFilter).
@@ -751,6 +763,9 @@ func (s *Store) bucketSeriesWeekly(ctx context.Context, f storage.UsageFilter, n
 		weeklyFilter.End = end
 		weeklyFilter.Start = end.AddDate(0, 0, -12*7)
 	}
+	if weeklyFilter.End.Sub(weeklyFilter.Start) > weeklyMaxWindow {
+		weeklyFilter.Start = weeklyFilter.End.Add(-weeklyMaxWindow)
+	}
 	var rows []bucketRow
 	// Move each timestamp back to that week's Monday (localtime) by subtracting
 	// ((weekday+6) % 7) days, where SQLite's %w is 0=Sunday…6=Saturday.
@@ -783,6 +798,9 @@ func (s *Store) bucketSeriesMonthly(ctx context.Context, f storage.UsageFilter, 
 		end := startOfMonthLocal(now).AddDate(0, 1, 0)
 		monthlyFilter.End = end
 		monthlyFilter.Start = end.AddDate(0, -12, 0)
+	}
+	if maxStart := monthlyFilter.End.AddDate(0, -monthlyMaxMonths, 0); monthlyFilter.Start.Before(maxStart) {
+		monthlyFilter.Start = maxStart
 	}
 	var rows []bucketRow
 	if err := s.applyFilter(ctx, monthlyFilter).

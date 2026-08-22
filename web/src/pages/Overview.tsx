@@ -27,6 +27,20 @@ function titleFor(g: SeriesGranularity): string {
   return GRANULARITIES.find((x) => x.key === g)?.label ?? "Hourly";
 }
 
+// Keep in sync with server-side caps in internal/storage/sqlite/usage.go.
+const GRANULARITY_CAPS: Partial<Record<SeriesGranularity, string>> = {
+  hourly: "last 7d",
+  weekly: "last 26w",
+  monthly: "last 12mo",
+};
+
+const WIDE_RANGES = new Set(["30d", "all"]);
+
+function capHintFor(g: SeriesGranularity, range: string): string {
+  if (!WIDE_RANGES.has(range)) return "";
+  return GRANULARITY_CAPS[g] ?? "";
+}
+
 function GranularityToggle({
   value,
   onChange,
@@ -212,6 +226,11 @@ export default function Overview() {
             <div className="flex items-center justify-between mb-2">
               <h2 className="text-sm uppercase tracking-wider text-muted">
                 {titleFor(requestsGranularity)} upstream calls
+                {capHintFor(requestsGranularity, filter.range) && (
+                  <span className="ml-2 text-[10px] normal-case tracking-normal text-muted/70">
+                    · {capHintFor(requestsGranularity, filter.range)}
+                  </span>
+                )}
               </h2>
               <GranularityToggle
                 value={requestsGranularity}
@@ -233,6 +252,11 @@ export default function Overview() {
             <div className="flex items-center justify-between mb-2">
               <h2 className="text-sm uppercase tracking-wider text-muted">
                 {titleFor(tokensGranularity)} tokens
+                {capHintFor(tokensGranularity, filter.range) && (
+                  <span className="ml-2 text-[10px] normal-case tracking-normal text-muted/70">
+                    · {capHintFor(tokensGranularity, filter.range)}
+                  </span>
+                )}
               </h2>
               <GranularityToggle
                 value={tokensGranularity}
