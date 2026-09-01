@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import { api } from "../api/client";
 import type { Filter, RangeKey, ResultFilter, APIKeyFilterOption } from "../api/types";
+import { useRefreshTick } from "../lib/refresh";
 
 const RANGE_PRESETS: { key: RangeKey; label: string }[] = [
   { key: "today", label: "Today" },
@@ -38,6 +39,7 @@ export default function FilterBar({
   const [models, setModels] = useState<string[]>([]);
   const [sources, setSources] = useState<string[]>([]);
   const [apiKeyOptions, setApiKeyOptions] = useState<APIKeyFilterOption[]>([]);
+  const refreshTick = useRefreshTick();
 
   useEffect(() => {
     if (!showFacets) return;
@@ -56,7 +58,7 @@ export default function FilterBar({
     return () => {
       cancelled = true;
     };
-  }, [filter.range, filter.start, filter.end, filter.authIndex, showFacets]);
+  }, [filter.range, filter.start, filter.end, filter.authIndex, showFacets, refreshTick]);
 
   const update = (patch: Partial<Filter>) => onChange({ ...filter, ...patch });
   const updateRange = (range: RangeKey) => {
