@@ -5,8 +5,28 @@ export function timelineKey(event: UsageEventRecord): string {
   return id ? `request:${id}` : `event:${event.event_key}`;
 }
 
-export function timelineURL(key: string): string {
-  return `/timeline?${new URLSearchParams({ key })}`;
+export function timelineURL(
+  key: string,
+  options: { event?: UsageEventRecord; eventsPath?: string } = {},
+): string {
+  const params = new URLSearchParams({ key });
+  if (options.event) {
+    params.set("focus_event", options.event.event_key);
+    params.set("origin_request", timelineKey(options.event));
+    if (options.event.session_id)
+      params.set("context_session", options.event.session_id);
+  }
+  if (options.eventsPath)
+    params.set("events", eventsReturnPath(options.eventsPath));
+  return `/sessions?${params}`;
+}
+
+export function eventsReturnPath(path: string | null): string {
+  return path === "/events" || path?.startsWith("/events?") ? path : "/events";
+}
+
+export function shortID(id: string): string {
+  return id.length > 24 ? `${id.slice(0, 12)}…${id.slice(-8)}` : id;
 }
 
 export function sortTimelineEvents(

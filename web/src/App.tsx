@@ -1,10 +1,10 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useSession } from "./hooks/useSession";
 import Login from "./pages/Login";
 import Layout from "./components/Layout";
 import Overview from "./pages/Overview";
 import Analysis from "./pages/Analysis";
-import Timeline from "./pages/Timeline";
+import Sessions from "./pages/Sessions";
 import Events from "./pages/Events";
 import Credentials from "./pages/Credentials";
 import Pricing from "./pages/Pricing";
@@ -40,7 +40,8 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Overview />} />
           <Route path="/analysis" element={<Analysis />} />
-          <Route path="/timeline" element={<Timeline />} />
+          <Route path="/sessions" element={<Sessions />} />
+          <Route path="/timeline" element={<LegacyTimeline />} />
           <Route path="/events" element={<Events />} />
           <Route path="/credentials" element={<Credentials />} />
           <Route path="/pricing" element={<Pricing />} />
@@ -52,4 +53,9 @@ export default function App() {
       </Layout>
     </RefreshProvider>
   );
+}
+
+function LegacyTimeline() {
+  const location = useLocation();
+  return <Navigate to={"/sessions" + location.search} replace />;
 }

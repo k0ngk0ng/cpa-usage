@@ -25,8 +25,20 @@ type TimelinePage struct {
 // TimelineDetail is an insertion-ID snapshot. Later pages exclude new arrivals,
 // including delayed records whose timestamp precedes records already loaded.
 type TimelineDetail struct {
-	Summary    TimelineSummary    `json:"summary"`
-	Items      []UsageEventRecord `json:"items"`
-	Snapshot   uint64             `json:"snapshot"`
-	NextCursor uint64             `json:"next_cursor"`
+	Summary            TimelineSummary       `json:"summary"`
+	Items              []UsageEventRecord    `json:"items"`
+	Snapshot           uint64                `json:"snapshot"`
+	NextCursor         uint64                `json:"next_cursor"`
+	ReferencedOnly     bool                  `json:"referenced_only"`
+	Sessions           []TimelineSessionLink `json:"sessions"`
+	Parents            []TimelineSessionLink `json:"parent_sessions"`
+	ChildSessions      int64                 `json:"child_sessions"`
+	ReferencingRecords int64                 `json:"referencing_records"`
+	FocusedEvent       *UsageEventRecord     `json:"focused_event,omitempty"`
+}
+
+// TimelineSessionLink distinguishes an observed relationship from own usage.
+type TimelineSessionLink struct {
+	ID         string `json:"id"`
+	HasRecords bool   `json:"has_records"`
 }

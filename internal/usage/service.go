@@ -464,11 +464,20 @@ func (s *Service) Timelines(ctx context.Context, f Filter, mode string, p Page) 
 	return s.store.ListUsageTimelines(ctx, f.toStorage(), mode, storage.Page{Page: p.Page, PageSize: p.PageSize})
 }
 
-func (s *Service) TimelineDetail(ctx context.Context, key string, cursor, snapshot uint64) (*storage.TimelineDetail, error) {
-	detail, err := s.store.UsageTimelineDetail(ctx, key, cursor, snapshot, s.pricing.Snapshot())
+func (s *Service) TimelineDetail(ctx context.Context, key string, cursor, snapshot uint64, focusEvent ...string) (*storage.TimelineDetail, error) {
+	detail, err := s.store.UsageTimelineDetail(ctx, key, cursor, snapshot, s.pricing.Snapshot(), focusEvent...)
 	if err != nil {
 		return nil, err
 	}
 	s.decorateEvents(ctx, detail.Items)
+	if detail.FocusedEvent != nil {
+		focused := []storage.UsageEventRecord{*detail.FocusedEvent}
+		s.decorateEvents(ctx, focused)
+		detail.FocusedEvent = &focused[0]
+	}
 	return detail, nil
+}
+
+func (s *Service) SessionRequests(ctx context.Context, sessionID string, snapshot uint64, page int, focusKey string) (*storage.TimelinePage, error) {
+	return s.store.ListSessionRequests(ctx, sessionID, snapshot, page, focusKey)
 }

@@ -37,7 +37,9 @@ type Store interface {
 
 	// Usage timelines
 	ListUsageTimelines(ctx context.Context, f UsageFilter, mode string, p Page) (*TimelinePage, error)
-	UsageTimelineDetail(ctx context.Context, key string, cursor, snapshot uint64, prices map[string]ModelPriceSetting) (*TimelineDetail, error)
+	UsageTimelineDetail(ctx context.Context, key string, cursor, snapshot uint64, prices map[string]ModelPriceSetting, focusEvent ...string) (*TimelineDetail, error)
+
+	ListSessionRequests(ctx context.Context, sessionID string, snapshot uint64, page int, focusKey string) (*TimelinePage, error)
 
 	// Pricing
 	ListUsedModels(ctx context.Context) ([]string, error)

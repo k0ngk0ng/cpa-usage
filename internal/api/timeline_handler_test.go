@@ -36,7 +36,7 @@ func TestTimelineAPIValidationAuthAndDecoration(t *testing.T) {
 	tokens := auth.NewTokenManager(time.Hour, "test-password")
 	cfg := RouterConfig{BasePath: "/usage", Auth: AuthDeps{Enabled: true, CookieName: "test-session", Tokens: tokens}, Usage: UsageDeps{Service: service, Store: store}, Meta: MetaDeps{Store: store}}
 	router := New(cfg)
-	for _, path := range []string{"/usage/api/v1/usage/timelines", "/usage/api/v1/usage/timelines/detail?key=request:legacy"} {
+	for _, path := range []string{"/usage/api/v1/usage/timelines/session-requests?session_id=session&snapshot=1", "/usage/api/v1/usage/timelines", "/usage/api/v1/usage/timelines/detail?key=request:legacy"} {
 		rr := httptest.NewRecorder()
 		router.ServeHTTP(rr, httptest.NewRequest("GET", path, nil))
 		if rr.Code != 401 {
@@ -55,7 +55,7 @@ func TestTimelineAPIValidationAuthAndDecoration(t *testing.T) {
 		router.ServeHTTP(rr, req)
 		return rr
 	}
-	for _, query := range []string{"timelines?mode=invalid", "timelines?page=-1", "timelines?page=hello", "timelines?range=custom&start=bad&end=bad", "timelines/detail?key=request:", "timelines/detail?key=unknown:a", "timelines/detail?key=request:a&cursor=1", "timelines/detail?key=request:a&cursor=bad", "timelines/detail?key=request:a&snapshot=-1"} {
+	for _, query := range []string{"timelines/session-requests", "timelines/session-requests?session_id=session&snapshot=0", "timelines/session-requests?session_id=session&snapshot=1&page=-1", "timelines/session-requests?session_id=session&snapshot=1&page=bad", "timelines?mode=invalid", "timelines?page=-1", "timelines?page=hello", "timelines?range=custom&start=bad&end=bad", "timelines/detail?key=request:", "timelines/detail?key=unknown:a", "timelines/detail?key=request:a&cursor=1", "timelines/detail?key=request:a&cursor=bad", "timelines/detail?key=request:a&snapshot=-1"} {
 		if rr := call(query); rr.Code != 400 {
 			t.Errorf("%s: %d %s", query, rr.Code, rr.Body.String())
 		}
@@ -70,7 +70,7 @@ func TestTimelineAPIValidationAuthAndDecoration(t *testing.T) {
 			t.Fatalf("filter %s: %d %s", filter, rr.Code, rr.Body.String())
 		}
 	}
-	rr := call("timelines/detail?" + url.Values{"key": {"request:legacy"}}.Encode())
+	rr := call("timelines/detail?" + url.Values{"key": {"request:legacy"}, "focus_event": {"one"}}.Encode())
 	if rr.Code != 200 {
 		t.Fatalf("detail: %d %s", rr.Code, rr.Body.String())
 	}
@@ -81,7 +81,19 @@ func TestTimelineAPIValidationAuthAndDecoration(t *testing.T) {
 	if len(detail.Items) != 1 || detail.Items[0].APIGroupDisplay != "Team A" || detail.Items[0].ExecutionID != "execution" {
 		t.Fatalf("detail decoration: %+v", detail.Items)
 	}
+	if detail.FocusedEvent == nil || detail.FocusedEvent.APIGroupDisplay != "Team A" {
+		t.Fatalf("focused event not decorated: %+v", detail.FocusedEvent)
+	}
 	if strings.Contains(rr.Body.String(), rawKey) {
 		t.Fatal("raw API key leaked in timeline response")
+	}
+	rr = call("timelines/detail?key=session:parent")
+	if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"referenced_only":true`) {
+		t.Fatalf("parent response: %d %s", rr.Code, rr.Body.String())
+	}
+	rr = call("timelines/session-requests?session_id=session&snapshot=1&page=0&focus_key=request:legacy")
+	var requests storage.TimelinePage
+	if err := json.Unmarshal(rr.Body.Bytes(), &requests); err != nil || rr.Code != 200 || requests.Total != 1 || requests.Items[0].Key != "request:legacy" {
+		t.Fatalf("session requests: %d %s", rr.Code, rr.Body.String())
 	}
 }

@@ -43,6 +43,7 @@ export function extractRequestTurns(rawJson: string): Turn[] | null {
   if (Array.isArray(o.messages)) {
     for (const m of o.messages) turns.push(messageToTurn(m));
   }
+  if (typeof o.input === "string") turns.push({ role: "user", text: o.input, raw: { role: "user", content: o.input } });
   if (Array.isArray(o.input)) {
     // OpenAI Responses input[] is a mixed list: messages, function_call,
     // function_call_output, reasoning, etc. Top-level non-message items
@@ -1354,6 +1355,12 @@ export function extractResponseJSON(rawJson: string): StreamExtraction | null {
   if (!obj || typeof obj !== "object") return null;
   const o = obj as Record<string, unknown>;
   const out: StreamExtraction = { detected: false, content: "", thinking: "", errors: [], raw: obj };
+
+  // SDK-style Responses snapshots may retain only the convenience text field.
+  if (typeof o.output_text === "string" && !Array.isArray(o.output)) {
+    out.content = o.output_text;
+    out.detected = true;
+  }
 
   // Anthropic non-streaming: { content: [{type:'text', text:'...'}, {type:'thinking', thinking:'...'}, {type:'tool_use', name, input}] }
   if (Array.isArray(o.content)) {

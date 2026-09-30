@@ -51,11 +51,29 @@ func usageTimelineDetailHandler(deps UsageDeps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid timeline cursor"})
 			return
 		}
-		out, err := deps.Service.TimelineDetail(c.Request.Context(), key, cursor, snapshot)
+		out, err := deps.Service.TimelineDetail(c.Request.Context(), key, cursor, snapshot, c.Query("focus_event"))
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "timeline not found in retained usage records"})
+			c.JSON(http.StatusNotFound, gin.H{"error": kind + " not found in retained usage records"})
 			return
 		}
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, out)
+	}
+}
+
+func usageSessionRequestsHandler(deps UsageDeps) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := strings.TrimSpace(c.Query("session_id"))
+		snapshot, errSnapshot := strconv.ParseUint(c.Query("snapshot"), 10, 63)
+		page, errPage := strconv.Atoi(c.DefaultQuery("page", "0"))
+		if id == "" || len(id) > 2048 || errSnapshot != nil || snapshot == 0 || errPage != nil || page < 0 || page > 1000000 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "valid session_id, snapshot, and page are required"})
+			return
+		}
+		out, err := deps.Service.SessionRequests(c.Request.Context(), id, snapshot, page, c.Query("focus_key"))
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

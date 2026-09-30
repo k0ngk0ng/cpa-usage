@@ -384,9 +384,17 @@ export interface TimelinePage {
   page_size: number;
 }
 
+export interface TimelineSessionLink { id: string; has_records: boolean; }
+
 export interface TimelineDetail {
   summary: TimelineSummary;
   items: UsageEventRecord[];
   snapshot: number;
   next_cursor: number;
+  referenced_only: boolean;
+  sessions: TimelineSessionLink[];
+  parent_sessions: TimelineSessionLink[];
+  child_sessions: number;
+  referencing_records: number;
+  focused_event?: UsageEventRecord;
 }

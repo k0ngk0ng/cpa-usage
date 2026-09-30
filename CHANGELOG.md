@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.1
+
+- Replace Timeline with a session-first **Sessions** page, defaulting to **Today**; preserve old deep links.
+- Start from Events or request logs via **View session**, with the source request highlighted and expanded, including requests beyond the first page. Preserve Events filters on return.
+- Read chronological request input, response, and tool calls in expandable cards. Collapse earlier context, fetch logs on demand, and expose compact execution timing without a property dump.
+- Distinguish final responses from upstream fallback content and show missing/truncated log states explicitly.
+- Show referenced-only parents and observed child sessions instead of a misleading not-found page; keep own-session usage totals separate.
+- Add snapshot-based request pagination, full-session relationship discovery, and focused-event lookup with existing redaction/authentication.
+- Validate parent references, late-arrival snapshots, long-session focus, API authorization, and request/response projection with regression tests.
+
 ## 0.4.0
 
 - Add usage timelines grouped by request or session, with responsive waterfalls, zoom, execution details, session navigation, and complete JSON export.

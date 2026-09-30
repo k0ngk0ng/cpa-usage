@@ -107,7 +107,7 @@ func timelineSelector(q *gorm.DB, key string) (*gorm.DB, error) {
 	}
 }
 
-func (s *Store) UsageTimelineDetail(ctx context.Context, key string, cursor, snapshot uint64, prices map[string]storage.ModelPriceSetting) (*storage.TimelineDetail, error) {
+func (s *Store) UsageTimelineDetail(ctx context.Context, key string, cursor, snapshot uint64, prices map[string]storage.ModelPriceSetting, focusEvent ...string) (*storage.TimelineDetail, error) {
 	if cursor > 0 && (snapshot == 0 || cursor > snapshot) {
 		return nil, errors.New("invalid timeline cursor")
 	}
@@ -115,8 +115,13 @@ func (s *Store) UsageTimelineDetail(ctx context.Context, key string, cursor, sna
 	if _, err := timelineSelector(s.dbCtx(ctx).Model(&usageEventModel{}), key); err != nil {
 		return nil, err
 	}
+	kind, sessionID, _ := strings.Cut(key, ":")
 	if snapshot == 0 {
-		if err := query().Select("COALESCE(MAX(id), 0)").Scan(&snapshot).Error; err != nil {
+		scope := query()
+		if kind == "session" {
+			scope = s.dbCtx(ctx).Model(&usageEventModel{}).Where("session_id = ? OR parent_session_id = ?", sessionID, sessionID)
+		}
+		if err := scope.Select("COALESCE(MAX(id), 0)").Scan(&snapshot).Error; err != nil {
 			return nil, err
 		}
 	}
@@ -127,8 +132,40 @@ func (s *Store) UsageTimelineDetail(ctx context.Context, key string, cursor, sna
 		return nil, err
 	}
 	summary.Kind = strings.SplitN(key, ":", 2)[0]
+	detail := &storage.TimelineDetail{Summary: summary, Snapshot: snapshot, Items: []storage.UsageEventRecord{}, Sessions: []storage.TimelineSessionLink{}, Parents: []storage.TimelineSessionLink{}}
+	if kind == "session" {
+		refs := s.dbCtx(ctx).Model(&usageEventModel{}).Where("parent_session_id = ? AND id <= ? AND COALESCE(session_id, '') <> ?", sessionID, snapshot, sessionID)
+		if err := refs.Count(&detail.ReferencingRecords).Error; err != nil {
+			return nil, err
+		}
+		if err := s.dbCtx(ctx).Model(&usageEventModel{}).Where("parent_session_id = ? AND id <= ? AND COALESCE(session_id, '') NOT IN ('', ?)", sessionID, snapshot, sessionID).Distinct("session_id").Count(&detail.ChildSessions).Error; err != nil {
+			return nil, err
+		}
+	}
 	if summary.Records == 0 {
+		if kind == "session" && detail.ReferencingRecords > 0 {
+			detail.ReferencedOnly = true
+			return detail, nil
+		}
 		return nil, gorm.ErrRecordNotFound
+	}
+	var err error
+	detail.Sessions, err = s.timelineSessionLinks(ctx, query().Where("id <= ?", snapshot), "session_id")
+	if err != nil {
+		return nil, err
+	}
+	detail.Parents, err = s.timelineSessionLinks(ctx, query().Where("id <= ?", snapshot), "parent_session_id")
+	if err != nil {
+		return nil, err
+	}
+	if len(focusEvent) > 0 && focusEvent[0] != "" {
+		var focused []usageEventModel
+		if err := query().Where("id <= ? AND event_key = ?", snapshot, focusEvent[0]).Limit(1).Find(&focused).Error; err != nil {
+			return nil, err
+		}
+		if len(focused) > 0 {
+			detail.FocusedEvent = &usageEventRecords(focused, prices)[0]
+		}
 	}
 	var rows []usageEventModel
 	if err := query().Where("id > ? AND id <= ?", cursor, snapshot).Order("id ASC").Limit(timelineDetailSize + 1).Find(&rows).Error; err != nil {
@@ -139,5 +176,71 @@ func (s *Store) UsageTimelineDetail(ctx context.Context, key string, cursor, sna
 		rows = rows[:timelineDetailSize]
 		next = uint64(rows[len(rows)-1].ID)
 	}
-	return &storage.TimelineDetail{Summary: summary, Items: usageEventRecords(rows, prices), Snapshot: snapshot, NextCursor: next}, nil
+	detail.Items = usageEventRecords(rows, prices)
+	detail.NextCursor = next
+	return detail, nil
+}
+
+func (s *Store) timelineSessionLinks(ctx context.Context, scope *gorm.DB, column string) ([]storage.TimelineSessionLink, error) {
+	// column is an internal constant, never a query-string value.
+	var ids []string
+	if err := scope.Where("COALESCE("+column+", '') <> ''").Distinct(column).Order(column).Pluck(column, &ids).Error; err != nil {
+		return nil, err
+	}
+	links := make([]storage.TimelineSessionLink, 0, len(ids))
+	if len(ids) == 0 {
+		return links, nil
+	}
+	var existing []string
+	if err := s.dbCtx(ctx).Model(&usageEventModel{}).Where("session_id IN ?", ids).Distinct("session_id").Pluck("session_id", &existing).Error; err != nil {
+		return nil, err
+	}
+	found := make(map[string]bool, len(existing))
+	for _, id := range existing {
+		found[id] = true
+	}
+	for _, id := range ids {
+		links = append(links, storage.TimelineSessionLink{ID: id, HasRecords: found[id]})
+	}
+	return links, nil
+}
+
+// ListSessionRequests pages complete request summaries, rather than raw usage
+// rows. Counts and ordering cover this session's entire fixed usage snapshot.
+func (s *Store) ListSessionRequests(ctx context.Context, sessionID string, snapshot uint64, page int, focusKey string) (*storage.TimelinePage, error) {
+	const size = 20
+	if strings.TrimSpace(sessionID) == "" || snapshot == 0 {
+		return nil, errors.New("session_id and snapshot are required")
+	}
+	scope := func() *gorm.DB {
+		return s.dbCtx(ctx).Model(&usageEventModel{}).Where("session_id = ? AND id <= ?", sessionID, snapshot)
+	}
+	groups := func() *gorm.DB {
+		return scope().Select(requestGroupSQL + " AS key, MIN(timestamp) AS started").Group(requestGroupSQL)
+	}
+	var total int64
+	if err := s.dbCtx(ctx).Table("(?) AS requests", groups()).Count(&total).Error; err != nil {
+		return nil, err
+	}
+	if page <= 0 && focusKey != "" {
+		ranked := scope().Select(requestGroupSQL + " AS key, ROW_NUMBER() OVER (ORDER BY MIN(timestamp), " + requestGroupSQL + ") AS position").Group(requestGroupSQL)
+		var position int64
+		if err := s.dbCtx(ctx).Table("(?) AS ranked", ranked).Where("key = ?", focusKey).Select("position").Scan(&position).Error; err != nil {
+			return nil, err
+		}
+		if position > 0 {
+			page = int((position-1)/size) + 1
+		}
+	}
+	if page < 1 {
+		page = 1
+	}
+	rows := make([]storage.TimelineSummary, 0)
+	if err := scope().Select(timelineSummarySQL(requestGroupSQL)).Group(requestGroupSQL).Order("MIN(timestamp) ASC").Order(requestGroupSQL).Offset((page - 1) * size).Limit(size).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		rows[i].Kind = strings.SplitN(rows[i].Key, ":", 2)[0]
+	}
+	return &storage.TimelinePage{Items: rows, Total: total, Page: page, PageSize: size}, nil
 }

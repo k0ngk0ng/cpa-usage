@@ -156,3 +156,81 @@ func TestTimelineValidationEmptyAndOrdering(t *testing.T) {
 		}
 	}
 }
+
+func TestReferencedParentAndRefresh(t *testing.T) {
+	s := timelineStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	_, _, err := s.InsertUsageEvents(ctx, []storage.UsageEvent{
+		{EventKey: "child-1", RequestID: "r1", SessionID: "child", ParentSessionID: "missing-parent", Timestamp: now, TotalTokens: 40},
+		{EventKey: "child-2", RequestID: "r2", SessionID: "child", ParentSessionID: "missing-parent", Timestamp: now, TotalTokens: 50},
+		{EventKey: "reference-only", ParentSessionID: "missing-parent", Timestamp: now},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := s.UsageTimelineDetail(ctx, "session:missing-parent", 0, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !parent.ReferencedOnly || parent.Summary.Key != "session:missing-parent" || parent.ChildSessions != 1 || parent.ReferencingRecords != 3 || parent.Summary.Records != 0 || parent.Summary.TotalTokens != 0 || parent.Summary.StartedAtMs != 0 || len(parent.Items) != 0 {
+		t.Fatalf("referenced parent: %+v", parent)
+	}
+	if _, err := s.UsageTimelineDetail(ctx, "session:unknown", 0, 0, nil); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("unknown: %v", err)
+	}
+	_, _, err = s.InsertUsageEvents(ctx, []storage.UsageEvent{{EventKey: "parent-own", RequestID: "rp", SessionID: "missing-parent", Timestamp: now, TotalTokens: 7}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixed, err := s.UsageTimelineDetail(ctx, "session:missing-parent", 0, parent.Snapshot, nil)
+	if err != nil || !fixed.ReferencedOnly {
+		t.Fatalf("snapshot changed: %+v %v", fixed, err)
+	}
+	fresh, err := s.UsageTimelineDetail(ctx, "session:missing-parent", 0, 0, nil)
+	if err != nil || fresh.ReferencedOnly || fresh.Summary.TotalTokens != 7 || fresh.Summary.Records != 1 {
+		t.Fatalf("refresh mixed child totals: %+v %v", fresh, err)
+	}
+}
+
+func TestSessionRequestsFocusRelationsAndSnapshot(t *testing.T) {
+	s := timelineStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	events := make([]storage.UsageEvent, 205)
+	for i := range events {
+		events[i] = storage.UsageEvent{EventKey: fmt.Sprintf("row-%03d", i), RequestID: fmt.Sprintf("r-%03d", i/3), SessionID: "session", Timestamp: now, TotalTokens: 1}
+	}
+	events[204].ParentSessionID = "late-relation"
+	if _, _, err := s.InsertUsageEvents(ctx, events); err != nil {
+		t.Fatal(err)
+	}
+	detail, err := s.UsageTimelineDetail(ctx, "session:session", 0, 0, nil, "row-204")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Items) != 200 || detail.FocusedEvent == nil || detail.FocusedEvent.EventKey != "row-204" || len(detail.Parents) != 1 || detail.Parents[0].ID != "late-relation" || detail.Parents[0].HasRecords {
+		t.Fatalf("focus/relations missed later page: %+v", detail)
+	}
+	page, err := s.ListSessionRequests(ctx, "session", detail.Snapshot, 0, "request:r-068")
+	if err != nil || page.Page != 4 || page.Total != 69 || len(page.Items) != 9 || page.Items[0].Key != "request:r-060" || page.Items[0].Records != 3 {
+		t.Fatalf("focus page: %+v %v", page, err)
+	}
+	first, err := s.ListSessionRequests(ctx, "session", detail.Snapshot, 1, "")
+	if err != nil || first.Items[0].Key != "request:r-000" || first.Items[19].Key != "request:r-019" {
+		t.Fatalf("tie ordering: %+v %v", first, err)
+	}
+	if _, _, err := s.InsertUsageEvents(ctx, []storage.UsageEvent{{EventKey: "late", RequestID: "early", SessionID: "session", Timestamp: now.Add(-time.Hour)}, {EventKey: "outside", RequestID: "outside", SessionID: "other", Timestamp: now}}); err != nil {
+		t.Fatal(err)
+	}
+	fixed, err := s.ListSessionRequests(ctx, "session", detail.Snapshot, 0, "request:r-068")
+	if err != nil || fixed.Total != 69 || fixed.Page != 4 {
+		t.Fatalf("snapshot: %+v %v", fixed, err)
+	}
+	for _, focus := range []string{"late", "outside"} {
+		d, err := s.UsageTimelineDetail(ctx, "session:session", 0, detail.Snapshot, nil, focus)
+		if err != nil || d.FocusedEvent != nil {
+			t.Fatalf("focus escaped snapshot/group: %s %+v %v", focus, d, err)
+		}
+	}
+}

@@ -73,3 +73,15 @@ test("overlapping intervals preserve actual start offsets and unknown duration s
   assert.equal(observedEnd(row({ latency_ms: -10 })), origin);
   assert.equal(barPosition(origin, origin, origin, 0).width, "0%");
 });
+
+test("session links retain the originating event and safe Events filters", () => {
+  const event = row({ session_id: "session&one", trace_id: "request/id" });
+  const url = new URL(timelineURL(`session:${event.session_id}`, {event, eventsPath:"/events?range=today&result=failed"}), "https://example.com");
+  assert.equal(url.pathname,"/sessions");
+  assert.equal(url.searchParams.get("focus_event"),"one");
+  assert.equal(url.searchParams.get("origin_request"),"request:request/id");
+  assert.equal(url.searchParams.get("context_session"),"session&one");
+  assert.equal(url.searchParams.get("events"),"/events?range=today&result=failed");
+  const unsafe = new URL(timelineURL("request:r", {eventsPath:"https://elsewhere.test"}),"https://example.com");
+  assert.equal(unsafe.searchParams.get("events"),"/events");
+});

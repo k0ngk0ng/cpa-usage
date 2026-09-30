@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
-import { timelineKey, timelineURL } from "../lib/timeline";
+import EventTraceLinks from "./EventTraceLinks";
+import { responseBodyContent } from "../lib/sessionContent";
 import clsx from "clsx";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -225,7 +225,6 @@ export default function EventLogModal({ event, onClose }: Props) {
             </span>
           </div>
           <div className="flex shrink-0 items-center gap-1 sm:gap-2">
-            <Link className="text-xs text-accent border border-border rounded px-2 py-1" to={timelineURL(timelineKey(event))} onClick={onClose}>Timeline</Link>
             <a
               href={downloadHref}
               download
@@ -246,6 +245,10 @@ export default function EventLogModal({ event, onClose }: Props) {
             </button>
           </div>
         </header>
+        <div className="border-b border-border px-3 py-3 sm:px-4">
+          <p className="mb-1 text-[11px] text-muted">Trace this request or see every request in its session:</p>
+          <EventTraceLinks event={event} onNavigate={onClose} />
+        </div>
 
         {loading && <LoadingLogView requestId={event.request_id} progress={loadProgress} />}
         {!loading && err && (
@@ -1393,7 +1396,8 @@ function finalChatTurns(requestRaw: string, responseRaw: string): Turn[] {
   return turns;
 }
 
-function responseToTurn(raw: string): Turn | null {
+export function responseToTurn(raw: string): Turn | null {
+  raw = responseBodyContent(raw);
   if (!raw.trim()) return null;
   const stream = extractResponseStream(raw);
   if (stream.detected) {
@@ -1486,16 +1490,20 @@ function ToggleButton({
   );
 }
 
-const ChatView = memo(function ChatView({
+export const ChatView = memo(function ChatView({
   turns,
   rootRef,
   locatedTurnIndex,
+  contentOnly = false,
+  toolContext,
 }: {
   turns: Turn[];
   rootRef?: React.Ref<HTMLDivElement>;
   locatedTurnIndex?: number;
+  contentOnly?: boolean;
+  toolContext?: Turn[];
 }) {
-  const toolNamesByCallID = useMemo(() => collectToolCallNames(turns), [turns]);
+  const toolNamesByCallID = useMemo(() => collectToolCallNames(toolContext || turns), [turns, toolContext]);
   const [expandedTools, setExpandedTools] = useState<Set<number>>(
     () => new Set(
       turns.flatMap((turn, index) =>
@@ -1538,10 +1546,10 @@ const ChatView = memo(function ChatView({
       {turns.map((turn, index) => {
         const isTool = isToolTurn(turn);
         const isUserQuestion = isUserQuestionTurn(turn);
-        const collapsed = isTool && !expandedTools.has(index);
+        const collapsed = !contentOnly && isTool && !expandedTools.has(index);
         const rawText = turnRawText(turn);
         const rawExpanded = rawText != null && expandedRaw.has(index);
-        const copyText = rawText ?? turnText(turn);
+        const copyText = contentOnly ? turnText(turn) : rawText ?? turnText(turn);
         const bubbleClass = isTool ? "chat-bubble-tool" : chatBubbleClass(turn.role);
         const parts = rawExpanded || collapsed ? null : visualContentParts(turn);
         const roleLabel = isTool ? toolTurnRoleLabel(turn) : turn.role;
@@ -1566,12 +1574,12 @@ const ChatView = memo(function ChatView({
                 </span>
                 <span className="chat-turn">#{index + 1}</span>
                 <div className="chat-actions">
-                  {isTool && (
+                  {isTool && !contentOnly && (
                     <button className="chat-toggle" onClick={() => toggleTool(index)}>
                       {collapsed ? "Expand" : "Collapse"}
                     </button>
                   )}
-                  {rawText != null && (
+                  {rawText != null && !contentOnly && (
                     <button
                       className={clsx("chat-toggle", rawExpanded && "chat-toggle-active")}
                       onClick={() => toggleRaw(index)}
@@ -1584,7 +1592,7 @@ const ChatView = memo(function ChatView({
                   <button
                     className={clsx("chat-toggle", copiedTurn === index && "chat-toggle-active")}
                     onClick={() => copyTurn(index, copyText)}
-                    title={rawText != null ? "Copy JSON" : "Copy message text"}
+                    title={!contentOnly && rawText != null ? "Copy JSON" : "Copy message text"}
                   >
                     {copiedTurn === index ? "Copied" : "Copy"}
                   </button>
