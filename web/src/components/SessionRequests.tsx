@@ -8,6 +8,7 @@ import {
 } from "../lib/sessionRequests";
 import { api } from "../api/client";
 import type { TimelineDetail, TimelinePage } from "../api/types";
+import { barPosition } from "../lib/timeline";
 import { defaultFilter } from "../hooks/useFilter";
 import { formatLatency, formatNumber, formatTimestamp } from "../lib/utils";
 
@@ -82,6 +83,10 @@ export function SessionRequests({
       selectedRequest.current?.scrollIntoView({ block: "nearest" });
     }
   }, [data, originRequest]);
+  const duration = Math.max(
+    1,
+    detail.summary.ended_at_ms - detail.summary.started_at_ms,
+  );
   return (
     <section
       ref={root}
@@ -96,8 +101,8 @@ export function SessionRequests({
         </span>
       </h3>
       <p className="text-xs leading-relaxed text-muted">
-        Oldest first · Select a request to read its input, response and tool
-        calls.
+        Oldest first · Bars share the session’s time scale. Select a request to
+        read its input, response and tool calls.
       </p>
       {originRequest &&
         data?.items.some((request) => request.key === originRequest) && (
@@ -159,21 +164,22 @@ export function SessionRequests({
                   title={`${request.key.slice(request.key.indexOf(":") + 1)} · ${request.model || "Unknown model"} · ${formatNumber(request.total_tokens)} tokens`}
                   className={clsx(
                     "flex min-h-9 w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-xs hover:bg-panel2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent",
-                    request.key === originRequest && "border-l-2 border-accent",
+                    request.key === originRequest &&
+                      "ring-1 ring-inset ring-accent",
                   )}
                 >
-                  <span className="w-8 shrink-0 text-muted tabular-nums">
+                  <span className="w-6 shrink-0 text-muted tabular-nums">
                     #{index + 1}
                   </span>
                   <time
                     dateTime={new Date(request.started_at_ms).toISOString()}
-                    className="shrink-0 tabular-nums"
+                    className="w-14 shrink-0 tabular-nums"
                   >
                     {formatTimestamp(
                       new Date(request.started_at_ms).toISOString(),
                     ).slice(11)}
                   </time>
-                  <span className="min-w-0 flex-1 truncate text-muted">
+                  <span className="hidden w-32 shrink-0 truncate text-muted sm:block">
                     {(index === 0 ||
                       request.model !== data.items[index - 1].model ||
                       request.model_count > 1) && (
@@ -184,15 +190,38 @@ export function SessionRequests({
                       </>
                     )}
                   </span>
-                  {request.failed > 0 && (
-                    <span className="shrink-0 text-danger">
-                      {request.failed} failed
-                    </span>
-                  )}
-                  <span className="shrink-0 text-muted tabular-nums">
-                    {formatLatency(request.ended_at_ms - request.started_at_ms)}
+                  <span
+                    className="relative h-4 min-w-0 flex-1 overflow-hidden rounded bg-panel2"
+                    role="img"
+                    aria-label={`Request timing: ${formatLatency(request.started_at_ms - detail.summary.started_at_ms)} into session, ${formatLatency(request.ended_at_ms - request.started_at_ms)} duration`}
+                  >
+                    <span
+                      className={clsx(
+                        "absolute inset-y-1 rounded",
+                        request.failed ? "bg-danger" : "bg-accent",
+                      )}
+                      style={barPosition(
+                        request.started_at_ms,
+                        request.ended_at_ms,
+                        detail.summary.started_at_ms,
+                        duration,
+                      )}
+                    />
                   </span>
-                  <span aria-hidden="true" className="shrink-0 text-muted">
+                  <span
+                    className={clsx(
+                      "w-16 shrink-0 text-right tabular-nums",
+                      request.failed ? "text-danger" : "text-muted",
+                    )}
+                    title={`${formatLatency(request.ended_at_ms - request.started_at_ms)}${request.failed ? ` · ${request.failed} failed` : ""}`}
+                  >
+                    {request.failed
+                      ? `${request.failed} failed`
+                      : formatLatency(
+                          request.ended_at_ms - request.started_at_ms,
+                        )}
+                  </span>
+                  <span aria-hidden="true" className="w-2 shrink-0 text-muted">
                     {expanded.has(request.key) ? "▾" : "▸"}
                   </span>
                 </button>

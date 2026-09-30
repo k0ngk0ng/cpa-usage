@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.4
+
+- Restore request timing bars inside compact session rows, using aligned columns and a shared full-session time scale.
+- Keep continuous lists, compact row height, failure-only status text, and refresh position/expansion preservation.
+
 ## 0.4.3
 
 - Show all requests and related sessions in continuous lists without page controls.
