@@ -17,6 +17,9 @@ func (s *Store) Cleanup(ctx context.Context, now time.Time) error {
 		Delete(&usageEventModel{}).Error; err != nil {
 		return err
 	}
+	if err := s.dbCtx(ctx).Exec("DELETE FROM request_log_labels WHERE NOT EXISTS (SELECT 1 FROM usage_events WHERE usage_events.request_id = request_log_labels.request_id)").Error; err != nil {
+		return err
+	}
 	if err := s.dbCtx(ctx).Exec("VACUUM").Error; err != nil {
 		return err
 	}

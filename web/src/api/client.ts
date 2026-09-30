@@ -1,4 +1,5 @@
 import type {
+  SessionLabel,
   TimelinePage,
   TimelineDetail,
   AliasesExport,
@@ -204,6 +205,9 @@ function buildFacetQuery(filter: Filter, extra: Record<string, string | number |
 }
 
 export const api = {
+  async sessionLabel(sessionID: string, signal?: AbortSignal, cached = false): Promise<SessionLabel> {
+    return request("/usage/sessions/label?" + new URLSearchParams({ session_id: sessionID, ...(cached ? { cached: "1" } : {}) }), { signal });
+  },
   async timelines(filter: Filter, mode: string, page: number, selectors: Record<string, string>, signal?: AbortSignal): Promise<TimelinePage> {
     return request("/usage/timelines" + buildQuery(filter, { mode, page, ...selectors }), { signal });
   },

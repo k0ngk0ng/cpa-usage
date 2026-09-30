@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.2
+
+- Show readable session names on lists, details, and parent/child links; keep UUIDs as secondary identifiers with a Copy ID action.
+- Capture titles from associated naming request logs, including Claude structured-title helpers and Responses/Chat Completions JSON or completed SSE responses. Requests must contain naming evidence; ordinary assistant answers are not treated as titles.
+- Fall back to a clearly labeled user-message preview for Codex and Claude conversations without an observable naming request. Skip environment/instruction scaffolding, tool results, and hidden content.
+- Persist request-log labels in SQLite, prefer newer captured titles over earlier prompt previews, and never inherit child titles into missing parents.
+- Discover labels lazily in bounded batches, with concurrency and download limits, missing-log retry cooldowns, and retention cleanup. Full request-log reads also capture label evidence.
+- Verify extraction, failure/partial-stream rejection, cache precedence, session isolation, retention, API authentication, remote-log bounds, and desktop/mobile rendering.
+
 ## 0.4.1
 
 - Replace Timeline with a session-first **Sessions** page, defaulting to **Today**; preserve old deep links.

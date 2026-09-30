@@ -114,6 +114,7 @@ func (apiKeyAliasModel) TableName() string { return "api_key_aliases" }
 func allModels() []any {
 	return []any{
 		&usageEventModel{},
+		&requestLabelModel{},
 		&authFileModel{},
 		&providerMetadataModel{},
 		&modelPriceSettingModel{},

@@ -16,9 +16,15 @@ CPA v6.10 removed the legacy `/v0/management/usage/{export,import}` HTTP endpoin
 - Optional JWT cookie-based password login
 - Retains usage events indefinitely by default; optional daily 03:00 retention cleanup is configurable
 
-## Sessions (0.4.1)
+## Sessions (0.4.2)
 
 Start in **Events** and choose **View session** on a row or in its request-log dialog. The session opens on the page containing that request, highlighted and expanded. Read requests oldest first: each expandable card shows **Request input**, **Response**, and tool calls/results. Earlier supplied conversation context is collapsed so repeated history does not overwhelm the page; it remains available in full. **Execution timeline** reveals compact observed usage bars. **Open request log** opens complete properties and raw content. **View request** also works for records without a session ID.
+
+Sessions display **Captured title** when an associated request log contains a recognizable naming instruction and its final generated title. Claude Code's structured-title helpers and OpenAI Responses/Chat Completions JSON or completed SSE formats are supported. Otherwise, **Prompt preview** shows an excerpt from the earliest readable retained user input, excluding instruction/environment scaffolding and tool results. UUIDs remain below the name and can be copied in the detail view. Titles also appear on parent/child links.
+
+CPA usage does not contain client titles. A Codex or Claude title generated outside CPA, a client-side rename, or a naming request without a retained session association cannot be recovered. Previews are not presented as client-generated titles, and no additional model call is made. A referenced-only parent never inherits a child's title.
+
+Names are discovered separately from usage loading and cached in SQLite. Previously captured names load immediately from the cache before further log discovery (`cached=1` on the label endpoint). Each lookup reads at most eight logs (prioritizing early context and recent naming calls), with two concurrent lookups and a 12-second budget. Background discovery skips logs over 8 MiB and limits parsed bodies to 2 MiB; opening the full request log can capture evidence from larger logs. The UI checks up to three batches per visit; Refresh resumes discovery. Unavailable logs retry after five minutes. Captured names remain cached while their associated usage is retained; configured usage cleanup removes orphaned labels. The newest captured naming response takes precedence over previews.
 
 The **Sessions** page lists sessions only, with **Today** as the default range. Filter by time, model, credential, API key, result, or an exact session/parent-session/trace/request/execution ID. Filters select sessions with matching activity; opening a session includes its full retained history. Requests are paginated in chronological order (20 per page), with complete counts even when a session exceeds 200 usage records. Events return links preserve the original filters. Old `/timeline` links redirect to `/sessions` with their parameters preserved.
 
@@ -34,6 +40,8 @@ Input/output is loaded lazily from the existing request-log API. JSON and SSE re
 2. 当前请求会在会话列表中高亮并展开；按时间依次展开其他请求，阅读输入、响应和工具调用。**Earlier context** 可展开请求携带的完整历史上下文。
 3. **Execution timeline** 查看该请求内的执行耗时；**Open request log** 查看完整属性和原始日志。
 4. **Related sessions** 继续查看父会话、子会话；**← Events** 返回原来的筛选结果。
+
+列表、详情和父子会话链接优先显示 **Captured title**；无法捕获自动名称时显示 **Prompt preview**，UUID 作为辅助信息保留。Codex/Claude 在 CPA 之外生成或手动修改的名称无法直接同步。
 
 Sessions 默认 **Today**。没有 session ID 的旧记录仍可从 Events 的 **View request** 查看。只有父会话引用时会解释自身记录缺失并列出子会话；请求/响应正文依赖仍可读取的 CPA request log。
 
@@ -83,7 +91,7 @@ curl 'http://127.0.0.1:8318/usage/api/v1/usage/overview?range=24h' | jq
 GitHub Releases ship a `cpa-usage_<version>_linux_<arch>.tar.gz` archive (`amd64` and `aarch64`). The accompanying installer reuses the `cliproxy` system user that the CPA installer creates (so cpa-usage and CPA share state under `/home/cliproxy`), drops the binary under `/home/cliproxy/cpa-usage/releases/<ver>`, and writes a systemd unit:
 
 ```bash
-sudo ./cpa-usage-install.sh --version 0.4.1
+sudo ./cpa-usage-install.sh --version 0.4.2
 ```
 
 After install, edit `/home/cliproxy/cpa-usage/.env` to populate `CPA_BASE_URL` and `CPA_MANAGEMENT_KEY`, then:
@@ -150,6 +158,7 @@ All endpoints are mounted under `<APP_BASE_PATH>/api/v1`. Protected endpoints re
 | GET | `/usage/overview` | summary + hourly + daily + range-sized 15-minute health grid |
 | GET | `/usage/health` | year request matrix + optional selected-day 5-minute detail |
 | GET | `/usage/analysis` | aggregations by API / model / both |
+| GET | `/usage/sessions/label?session_id=<id>` | cached title/preview and bounded request-log discovery (`title`, `source`, `request_id`, `more`) |
 | GET | `/usage/timelines` | paginated request/session groups; matching filters select complete retained groups |
 | GET | `/usage/timelines/detail` | observed envelope, session relationships, and cursor-paginated records for one group |
 | GET | `/usage/timelines/session-requests` | chronological request groups within a session snapshot; optional source-request focus |

@@ -36,7 +36,7 @@ func TestTimelineAPIValidationAuthAndDecoration(t *testing.T) {
 	tokens := auth.NewTokenManager(time.Hour, "test-password")
 	cfg := RouterConfig{BasePath: "/usage", Auth: AuthDeps{Enabled: true, CookieName: "test-session", Tokens: tokens}, Usage: UsageDeps{Service: service, Store: store}, Meta: MetaDeps{Store: store}}
 	router := New(cfg)
-	for _, path := range []string{"/usage/api/v1/usage/timelines/session-requests?session_id=session&snapshot=1", "/usage/api/v1/usage/timelines", "/usage/api/v1/usage/timelines/detail?key=request:legacy"} {
+	for _, path := range []string{"/usage/api/v1/usage/sessions/label?session_id=session", "/usage/api/v1/usage/timelines/session-requests?session_id=session&snapshot=1", "/usage/api/v1/usage/timelines", "/usage/api/v1/usage/timelines/detail?key=request:legacy"} {
 		rr := httptest.NewRecorder()
 		router.ServeHTTP(rr, httptest.NewRequest("GET", path, nil))
 		if rr.Code != 401 {

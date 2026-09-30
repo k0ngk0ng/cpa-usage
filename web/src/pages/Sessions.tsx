@@ -7,6 +7,8 @@ import type {
   TimelineDetail,
   TimelinePage,
 } from "../api/types";
+import { copyToClipboard } from "../components/EventLogModal";
+import SessionName from "../components/SessionName";
 import FilterBar from "../components/FilterBar";
 import {
   SessionRequests,
@@ -15,7 +17,7 @@ import {
 import RequestConversation from "../components/RequestConversation";
 import { todayFilter } from "../hooks/useFilter";
 import { useRefreshTick } from "../lib/refresh";
-import { eventsReturnPath, shortID } from "../lib/timeline";
+import { eventsReturnPath } from "../lib/timeline";
 import { formatLatency, formatNumber, formatTimestamp } from "../lib/utils";
 
 const button =
@@ -230,12 +232,7 @@ export default function Sessions() {
                 onClick={() => open(s.key)}
                 className="min-w-0 space-y-3 rounded-lg border border-border bg-panel p-4 text-left hover:bg-panel2"
               >
-                <div
-                  className="truncate font-mono text-sm"
-                  title={s.key.slice(8)}
-                >
-                  {shortID(s.key.slice(8))}
-                </div>
+                <SessionName id={s.key.slice(8)} />
                 <div className="text-xs text-muted">
                   {formatTimestamp(new Date(s.started_at_ms).toISOString())}
                 </div>
@@ -411,9 +408,16 @@ function SessionDetail({
         <h2 className="text-base font-semibold">
           {isSession ? "Session" : "Request"}
         </h2>
-        <div className="break-all font-mono text-xs text-muted">
-          {timelineID.slice(timelineID.indexOf(":") + 1)}
-        </div>
+        {isSession ? (
+          <div className="flex items-start gap-3">
+            <SessionName id={timelineID.slice(8)} fullID revision={revision} />
+            <CopySessionID id={timelineID.slice(8)} />
+          </div>
+        ) : (
+          <div className="break-all font-mono text-xs text-muted">
+            {timelineID.slice(timelineID.indexOf(":") + 1)}
+          </div>
+        )}
         {data && !data.referenced_only && (
           <>
             <div className="flex flex-wrap gap-3 text-xs">
@@ -466,7 +470,8 @@ function SessionDetail({
                   key={s.id}
                   onClick={() => onOpen(`session:${s.id}`)}
                 >
-                  View session · {shortID(s.id)} →
+                  <span className="mb-1 block text-accent">View session →</span>
+                  <SessionName id={s.id} />
                 </button>
               ))
             ) : (
@@ -511,5 +516,19 @@ function SessionDetail({
           />
         ))}
     </section>
+  );
+}
+
+function CopySessionID({ id }: { id: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      className="shrink-0 text-xs text-accent"
+      onClick={() => {
+        void copyToClipboard(id).then(setCopied);
+      }}
+    >
+      {copied ? "Copied" : "Copy ID"}
+    </button>
   );
 }

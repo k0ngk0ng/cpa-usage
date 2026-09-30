@@ -398,3 +398,10 @@ export interface TimelineDetail {
   referencing_records: number;
   focused_event?: UsageEventRecord;
 }
+
+export interface SessionLabel {
+  title: string;
+  source: "generated_title" | "prompt_preview" | "";
+  request_id?: string;
+  more: boolean;
+}

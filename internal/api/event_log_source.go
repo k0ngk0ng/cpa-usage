@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,7 +47,7 @@ func eventLogSourceConfigured(deps UsageDeps) bool {
 	return deps.LogDownloader != nil || (deps.LogReader != nil && strings.TrimSpace(deps.LogReader.Dir) != "")
 }
 
-func resolveEventLog(ctx context.Context, deps UsageDeps, requestID string) (*eventLogHandle, error) {
+func resolveEventLog(ctx context.Context, deps UsageDeps, requestID string, maxBytes ...int64) (*eventLogHandle, error) {
 	localLog, err := resolveLocalEventLog(deps, requestID)
 	if err == nil {
 		return localLog, nil
@@ -69,7 +70,11 @@ func resolveEventLog(ctx context.Context, deps UsageDeps, requestID string) (*ev
 	tmpPath := tmp.Name()
 	cleanup := func() { _ = os.Remove(tmpPath) }
 
-	meta, downloadErr := deps.LogDownloader.DownloadRequestLog(ctx, requestID, tmp)
+	var destination io.Writer = tmp
+	if len(maxBytes) > 0 && maxBytes[0] > 0 {
+		destination = &boundedLogWriter{writer: tmp, remaining: maxBytes[0]}
+	}
+	meta, downloadErr := deps.LogDownloader.DownloadRequestLog(ctx, requestID, destination)
 	closeErr := tmp.Close()
 	if downloadErr != nil {
 		cleanup()
@@ -103,9 +108,14 @@ func resolveLocalEventLog(deps UsageDeps, requestID string) (*eventLogHandle, er
 	if err != nil {
 		return nil, err
 	}
+	info, err := os.Stat(localPath)
+	if err != nil {
+		return nil, err
+	}
 	return &eventLogHandle{
 		path:     localPath,
 		fileName: filepath.Base(localPath),
+		fileSize: info.Size(),
 	}, nil
 }
 
@@ -144,4 +154,19 @@ func eventLogReader(deps UsageDeps) *cpa.LogReader {
 		return deps.LogReader
 	}
 	return &cpa.LogReader{}
+}
+
+// Abort oversized background downloads instead of buffering complete transcripts.
+type boundedLogWriter struct {
+	writer    io.Writer
+	remaining int64
+}
+
+func (w *boundedLogWriter) Write(p []byte) (int, error) {
+	if int64(len(p)) > w.remaining {
+		return 0, errors.New("request log exceeds title discovery size limit")
+	}
+	n, err := w.writer.Write(p)
+	w.remaining -= int64(n)
+	return n, err
 }

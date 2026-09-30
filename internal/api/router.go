@@ -62,6 +62,7 @@ func New(cfg RouterConfig) *gin.Engine {
 				protected.GET("/usage/overview", usageOverviewHandler(cfg.Usage))
 				protected.GET("/usage/health", usageHealthHandler(cfg.Usage))
 				protected.GET("/usage/analysis", usageAnalysisHandler(cfg.Usage))
+				protected.GET("/usage/sessions/label", usageSessionLabelHandler(cfg.Usage))
 				protected.GET("/usage/timelines", usageTimelinesHandler(cfg.Usage))
 				protected.GET("/usage/timelines/session-requests", usageSessionRequestsHandler(cfg.Usage))
 				protected.GET("/usage/timelines/detail", usageTimelineDetailHandler(cfg.Usage))

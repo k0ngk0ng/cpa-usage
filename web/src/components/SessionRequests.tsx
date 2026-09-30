@@ -1,3 +1,4 @@
+import SessionName from "./SessionName";
 import RequestConversation from "./RequestConversation";
 import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
@@ -314,9 +315,7 @@ export function RelatedSessions({
                   "flex w-full flex-wrap items-center justify-between gap-2 text-left",
                 )}
               >
-                <span className="min-w-0 break-all font-mono" title={parent.id}>
-                  {parent.id}
-                </span>
+                <SessionName id={parent.id} />
                 <span className="text-accent">
                   {parent.has_records
                     ? "View parent session →"
@@ -348,12 +347,7 @@ export function RelatedSessions({
                 onClick={() => onOpen(child.key)}
                 className="min-w-0 rounded border border-border bg-bg p-3 text-left hover:bg-panel2 disabled:opacity-50"
               >
-                <div
-                  className="truncate font-mono text-xs"
-                  title={child.key.slice(8)}
-                >
-                  {shortID(child.key.slice(8))}
-                </div>
+                <SessionName id={child.key.slice(8)} />
                 <div className="mt-2 text-xs text-muted">
                   {child.request_count}{" "}
                   {child.request_count === 1 ? "request" : "requests"} ·{" "}

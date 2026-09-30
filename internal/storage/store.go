@@ -41,6 +41,10 @@ type Store interface {
 
 	ListSessionRequests(ctx context.Context, sessionID string, snapshot uint64, page int, focusKey string) (*TimelinePage, error)
 
+	SessionLabel(ctx context.Context, sessionID string) (SessionLabel, error)
+	SessionLabelCandidates(ctx context.Context, sessionID string) ([]string, error)
+	SaveRequestLabel(ctx context.Context, label RequestLabel) error
+
 	// Pricing
 	ListUsedModels(ctx context.Context) ([]string, error)
 	ListPricing(ctx context.Context) ([]ModelPriceSetting, error)

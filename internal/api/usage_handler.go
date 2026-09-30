@@ -167,6 +167,12 @@ func usageEventLogHandler(deps UsageDeps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		if deps.Store != nil {
+			title, source := cpa.SessionLabelFromLog(entry)
+			if title != "" {
+				_ = deps.Store.SaveRequestLabel(c.Request.Context(), storage.RequestLabel{RequestID: requestID, Title: title, Source: source, Complete: true})
+			}
+		}
 		logFile.ApplyMetadata(entry)
 		writeJSONWithLength(c, http.StatusOK, gin.H{"found": true, "entry": entry})
 	}
