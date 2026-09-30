@@ -242,11 +242,11 @@ export default function Sessions() {
                   {formatNumber(s.total_tokens)} tokens
                 </div>
                 <div className="flex flex-wrap justify-between gap-2 text-xs">
-                  <span className={s.failed ? "text-danger" : "text-muted"}>
-                    {s.failed
-                      ? `${s.failed} failed usage records`
-                      : "No failures reported"}
-                  </span>
+                  {s.failed > 0 && (
+                    <span className="text-danger">
+                      {s.failed} failed usage records
+                    </span>
+                  )}
                   <span className="text-accent">Read session →</span>
                 </div>
               </button>
@@ -498,7 +498,7 @@ function SessionDetail({
           <>
             {!data.referenced_only && (
               <SessionRequests
-                key={`${timelineID}:${data.snapshot}`}
+                key={timelineID}
                 detail={data}
                 originRequest={originRequest}
                 focusEvent={focusEvent}
@@ -509,7 +509,7 @@ function SessionDetail({
           </>
         ) : (
           <RequestConversation
-            key={`${timelineID}:${data.snapshot}`}
+            key={timelineID}
             requestKey={timelineID}
             snapshot={data.snapshot}
             focusEvent={focusEvent}

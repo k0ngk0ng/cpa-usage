@@ -29,11 +29,10 @@ export default function RequestConversation({
   const [log, setLog] = useState<UsageEventRecord | null>(null);
   useEffect(() => {
     const c = new AbortController();
-    setDetail(null);
     setError("");
     setLoading(true);
     api
-      .timelineDetail(requestKey, 0, snapshot, c.signal, focusEvent)
+      .timelineDetail(requestKey, 0, snapshot, c.signal, selected || focusEvent)
       .then((d) => {
         if (!c.signal.aborted) setDetail(d);
       })
@@ -133,12 +132,14 @@ export default function RequestConversation({
                     <span className="block truncate">
                       {e.model || "Unknown model"}
                     </span>
-                    <span className={e.failed ? "text-danger" : "text-muted"}>
-                      {e.failed
-                        ? `Failed ${e.fail_status_code || ""}`
-                        : "Success"}
-                      {e.timestamp_inferred && " · inferred time"}
-                    </span>
+                    {e.failed && (
+                      <span className="text-danger">
+                        Failed {e.fail_status_code || ""}
+                      </span>
+                    )}
+                    {e.timestamp_inferred && (
+                      <span className="text-muted"> · inferred time</span>
+                    )}
                   </span>
                   <span className="min-w-0">
                     <span className="relative block h-3 rounded bg-panel2">

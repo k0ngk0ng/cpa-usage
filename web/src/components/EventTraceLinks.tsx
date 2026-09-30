@@ -6,9 +6,11 @@ import { timelineKey, timelineURL } from "../lib/timeline";
 export default function EventTraceLinks({
   event,
   onNavigate,
+  showRequest = false,
 }: {
   event: UsageEventRecord;
   onNavigate?: () => void;
+  showRequest?: boolean;
 }) {
   const location = useLocation();
   const eventsPath =
@@ -38,13 +40,15 @@ export default function EventTraceLinks({
           Session unavailable
         </span>
       )}
-      <Link
-        className="text-accent hover:underline"
-        to={timelineURL(timelineKey(event), options)}
-        onClick={onNavigate}
-      >
-        View request →
-      </Link>
+      {showRequest && (
+        <Link
+          className="text-accent hover:underline"
+          to={timelineURL(timelineKey(event), options)}
+          onClick={onNavigate}
+        >
+          View request →
+        </Link>
+      )}
     </div>
   );
 }

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.3
+
+- Show all requests and related sessions in continuous lists without page controls.
+- Preserve expanded requests, selected executions, content, and reading position through automatic/manual refresh and late-arriving records; retain the existing list if refresh fails.
+- Use compact request rows with time and duration; show dates/models only when they change and move IDs/token totals to hover details. Remove repeated bars and success messages; show failures in red.
+- Remove View request links from Events rows; keep session links and request-log access.
+- Verify multi-page collection, aborts and incomplete responses, plus long-session refresh and narrow-screen rendering.
+
 ## 0.4.2
 
 - Show readable session names on lists, details, and parent/child links; keep UUIDs as secondary identifiers with a Copy ID action.

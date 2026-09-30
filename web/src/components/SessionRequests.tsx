@@ -1,12 +1,15 @@
 import SessionName from "./SessionName";
 import RequestConversation from "./RequestConversation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import clsx from "clsx";
+import {
+  collectSessionPages,
+  captureRequestPosition,
+} from "../lib/sessionRequests";
 import { api } from "../api/client";
 import type { TimelineDetail, TimelinePage } from "../api/types";
 import { defaultFilter } from "../hooks/useFilter";
 import { formatLatency, formatNumber, formatTimestamp } from "../lib/utils";
-import { barPosition, shortID } from "../lib/timeline";
 
 const button =
   "rounded border border-border bg-panel2 px-3 py-1.5 text-xs hover:text-ink disabled:opacity-40";
@@ -26,29 +29,37 @@ export function SessionRequests({
     () => new Set(originRequest ? [originRequest] : []),
   );
   const selectedRequest = useRef<HTMLElement | null>(null);
-  const [page, setPage] = useState(0);
+  const root = useRef<HTMLElement | null>(null);
+  const restorePosition = useRef<(() => void) | null>(null);
+  const locatedRequest = useRef("");
   const [data, setData] = useState<TimelinePage | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const sessionID = detail.summary.key.slice(8);
   useEffect(() => {
-    setPage(0);
-    setExpanded(new Set(originRequest ? [originRequest] : []));
+    if (originRequest)
+      setExpanded((current) => new Set([...current, originRequest]));
   }, [originRequest]);
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
     setError("");
-    api
-      .sessionRequests(
-        sessionID,
-        detail.snapshot,
-        page,
-        originRequest,
-        controller.signal,
-      )
+    collectSessionPages(
+      (page) =>
+        api.sessionRequests(
+          sessionID,
+          detail.snapshot,
+          page,
+          "",
+          controller.signal,
+        ),
+      controller.signal,
+    )
       .then((next) => {
-        if (!controller.signal.aborted) setData(next);
+        if (!controller.signal.aborted) {
+          restorePosition.current = captureRequestPosition(root.current);
+          setData(next);
+        }
       })
       .catch((e) => {
         if (!controller.signal.aborted) setError(e.message);
@@ -57,20 +68,23 @@ export function SessionRequests({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [sessionID, detail.snapshot, page, originRequest]);
+  }, [sessionID, detail]);
+  useLayoutEffect(() => {
+    restorePosition.current?.();
+    restorePosition.current = null;
+  }, [data]);
   useEffect(() => {
     if (
-      !loading &&
+      originRequest !== locatedRequest.current &&
       data?.items.some((request) => request.key === originRequest)
-    )
+    ) {
+      locatedRequest.current = originRequest;
       selectedRequest.current?.scrollIntoView({ block: "nearest" });
-  }, [data, loading, originRequest]);
-  const duration = Math.max(
-    1,
-    detail.summary.ended_at_ms - detail.summary.started_at_ms,
-  );
+    }
+  }, [data, originRequest]);
   return (
     <section
+      ref={root}
       className="space-y-3 border-t border-border p-4"
       aria-label="Requests in this session"
       aria-busy={loading}
@@ -82,15 +96,13 @@ export function SessionRequests({
         </span>
       </h3>
       <p className="text-xs leading-relaxed text-muted">
-        Read requests oldest first. Expand each request to read its input,
-        response and tool calls. Bars locate requests within the session;
-        related sessions have their own request lists.
+        Oldest first · Select a request to read its input, response and tool
+        calls.
       </p>
       {originRequest &&
         data?.items.some((request) => request.key === originRequest) && (
           <p className="text-xs text-accent">
-            The request you opened is highlighted. The list starts on its page
-            when it belongs to this session.
+            The request you opened is highlighted in the conversation.
           </p>
         )}
       {error && (
@@ -103,22 +115,36 @@ export function SessionRequests({
           Loading session requests…
         </p>
       )}
-      {data && !error && (
+      {data && (
         <>
-          <div className="grid gap-2">
+          <div className="divide-y divide-border overflow-hidden rounded-lg border border-border">
             {data.items.map((request, index) => (
               <article
                 ref={
                   request.key === originRequest ? selectedRequest : undefined
                 }
                 key={request.key}
+                data-request-key={request.key}
                 className={clsx(
-                  "min-w-0 overflow-hidden rounded-lg border",
-                  request.key === originRequest
-                    ? "border-accent"
-                    : "border-border",
+                  "min-w-0 overflow-hidden",
+                  request.key === originRequest ? "bg-accent/5" : "bg-bg",
                 )}
               >
+                {(index === 0 ||
+                  formatTimestamp(
+                    new Date(request.started_at_ms).toISOString(),
+                  ).slice(0, 10) !==
+                    formatTimestamp(
+                      new Date(
+                        data.items[index - 1].started_at_ms,
+                      ).toISOString(),
+                    ).slice(0, 10)) && (
+                  <div className="bg-panel2 px-3 py-1 text-[11px] text-muted">
+                    {formatTimestamp(
+                      new Date(request.started_at_ms).toISOString(),
+                    ).slice(0, 10)}
+                  </div>
+                )}
                 <button
                   onClick={() =>
                     setExpanded((current) => {
@@ -128,83 +154,47 @@ export function SessionRequests({
                       return next;
                     })
                   }
-                  disabled={loading}
                   aria-expanded={expanded.has(request.key)}
                   aria-label={`Read request ${request.key.slice(request.key.indexOf(":") + 1)}`}
+                  title={`${request.key.slice(request.key.indexOf(":") + 1)} · ${request.model || "Unknown model"} · ${formatNumber(request.total_tokens)} tokens`}
                   className={clsx(
-                    "w-full",
-                    "min-w-0 p-3 text-left hover:bg-panel2 disabled:opacity-50",
-                    request.key === originRequest
-                      ? "border-accent bg-accent/5"
-                      : "border-border bg-bg",
+                    "flex min-h-9 w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-xs hover:bg-panel2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent",
+                    request.key === originRequest && "border-l-2 border-accent",
                   )}
                 >
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <span className="text-muted">
-                      #{(data.page - 1) * data.page_size + index + 1} ·{" "}
-                      {formatTimestamp(
-                        new Date(request.started_at_ms).toISOString(),
-                      )}
-                    </span>
-                    <span
-                      className={
-                        request.failed ? "text-danger" : "text-success"
-                      }
-                    >
-                      {request.failed
-                        ? `${request.failed} / ${request.records} usage records failed`
-                        : "No failures reported"}
-                    </span>
-                  </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <strong className="text-sm">
-                      {request.model || "Unknown model"}
-                      {request.model_count > 1 &&
-                        ` +${request.model_count - 1} models`}
-                    </strong>
-                    <span
-                      className="min-w-0 truncate font-mono text-xs text-muted"
-                      title={request.key}
-                    >
-                      {shortID(request.key.slice(request.key.indexOf(":") + 1))}
-                    </span>
-                    {request.key === originRequest && (
-                      <span className="text-[10px] text-accent">
-                        Selected request
-                      </span>
+                  <span className="w-8 shrink-0 text-muted tabular-nums">
+                    #{index + 1}
+                  </span>
+                  <time
+                    dateTime={new Date(request.started_at_ms).toISOString()}
+                    className="shrink-0 tabular-nums"
+                  >
+                    {formatTimestamp(
+                      new Date(request.started_at_ms).toISOString(),
+                    ).slice(11)}
+                  </time>
+                  <span className="min-w-0 flex-1 truncate text-muted">
+                    {(index === 0 ||
+                      request.model !== data.items[index - 1].model ||
+                      request.model_count > 1) && (
+                      <>
+                        {request.model || "Unknown model"}
+                        {request.model_count > 1 &&
+                          ` +${request.model_count - 1}`}
+                      </>
                     )}
-                  </div>
-                  <div className="mt-3 h-2 overflow-hidden rounded bg-panel2">
-                    <div className="relative h-full">
-                      <div
-                        className={clsx(
-                          "absolute h-full rounded",
-                          request.failed ? "bg-warn" : "bg-accent",
-                        )}
-                        style={barPosition(
-                          request.started_at_ms,
-                          request.ended_at_ms,
-                          detail.summary.started_at_ms,
-                          duration,
-                        )}
-                      />
-                    </div>
-                  </div>
-                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <span className="text-muted">
-                      {formatLatency(
-                        request.ended_at_ms - request.started_at_ms,
-                      )}{" "}
-                      observed · {request.records} usage{" "}
-                      {request.records === 1 ? "record" : "records"} ·{" "}
-                      {formatNumber(request.total_tokens)} tokens
+                  </span>
+                  {request.failed > 0 && (
+                    <span className="shrink-0 text-danger">
+                      {request.failed} failed
                     </span>
-                    <span className="text-accent">
-                      {expanded.has(request.key)
-                        ? "Collapse request ↑"
-                        : "Read input & response ↓"}
-                    </span>
-                  </div>
+                  )}
+                  <span className="shrink-0 text-muted tabular-nums">
+                    {formatLatency(request.ended_at_ms - request.started_at_ms)}
+                  </span>
+                  <span aria-hidden="true" className="shrink-0 text-muted">
+                    {expanded.has(request.key) ? "▾" : "▸"}
+                  </span>
                 </button>
                 {expanded.has(request.key) && (
                   <>
@@ -232,28 +222,11 @@ export function SessionRequests({
               session to update it.
             </p>
           )}
-          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
-            <button
-              className={button}
-              disabled={loading || data.page <= 1}
-              onClick={() => setPage(data.page - 1)}
-            >
-              Previous requests
-            </button>
-            <span>
-              {data.total
-                ? `${(data.page - 1) * data.page_size + 1}–${Math.min(data.page * data.page_size, data.total)}`
-                : "0"}{" "}
-              of {formatNumber(data.total)} requests
-            </span>
-            <button
-              className={button}
-              disabled={loading || data.page * data.page_size >= data.total}
-              onClick={() => setPage(data.page + 1)}
-            >
-              Next requests
-            </button>
-          </div>
+          <p className="text-xs text-muted" role="status">
+            {loading
+              ? "Updating requests…"
+              : `${formatNumber(data.total)} requests`}
+          </p>
         </>
       )}
     </section>
@@ -267,7 +240,6 @@ export function RelatedSessions({
   detail: TimelineDetail;
   onOpen: (key: string) => void;
 }) {
-  const [page, setPage] = useState(1);
   const [data, setData] = useState<TimelinePage | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -276,14 +248,17 @@ export function RelatedSessions({
     const c = new AbortController();
     setLoading(true);
     setError("");
-    api
-      .timelines(
-        { ...defaultFilter, range: "all" },
-        "session",
-        page,
-        { parent_session_id: id },
-        c.signal,
-      )
+    collectSessionPages(
+      (page) =>
+        api.timelines(
+          { ...defaultFilter, range: "all" },
+          "session",
+          page,
+          { parent_session_id: id },
+          c.signal,
+        ),
+      c.signal,
+    )
       .then((next) => {
         if (!c.signal.aborted) setData(next);
       })
@@ -294,7 +269,7 @@ export function RelatedSessions({
         if (!c.signal.aborted) setLoading(false);
       });
     return () => c.abort();
-  }, [id, page, detail.snapshot]);
+  }, [id, detail]);
   return (
     <section
       className="space-y-3 border-t border-border p-4"
@@ -337,12 +312,11 @@ export function RelatedSessions({
       {loading && !data && (
         <p className="text-xs text-muted">Loading related sessions…</p>
       )}
-      {data && !error && (
+      {data && (
         <>
           <div className="grid gap-2 sm:grid-cols-2">
             {data.items.map((child) => (
               <button
-                disabled={loading}
                 key={child.key}
                 onClick={() => onOpen(child.key)}
                 className="min-w-0 rounded border border-border bg-bg p-3 text-left hover:bg-panel2 disabled:opacity-50"
@@ -369,27 +343,6 @@ export function RelatedSessions({
             <p className="text-xs text-muted">
               No child sessions are present in retained usage.
             </p>
-          )}
-          {data.total > data.page_size && (
-            <div className="flex items-center justify-between text-xs">
-              <button
-                className={button}
-                disabled={loading || page === 1}
-                onClick={() => setPage(page - 1)}
-              >
-                Previous sessions
-              </button>
-              <span className="text-muted">
-                Page {page} / {Math.ceil(data.total / data.page_size)}
-              </span>
-              <button
-                className={button}
-                disabled={loading || page * data.page_size >= data.total}
-                onClick={() => setPage(page + 1)}
-              >
-                Next sessions
-              </button>
-            </div>
           )}
         </>
       )}

@@ -247,7 +247,7 @@ export default function EventLogModal({ event, onClose }: Props) {
         </header>
         <div className="border-b border-border px-3 py-3 sm:px-4">
           <p className="mb-1 text-[11px] text-muted">Trace this request or see every request in its session:</p>
-          <EventTraceLinks event={event} onNavigate={onClose} />
+          <EventTraceLinks event={event} onNavigate={onClose} showRequest />
         </div>
 
         {loading && <LoadingLogView requestId={event.request_id} progress={loadProgress} />}
