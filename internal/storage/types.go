@@ -24,6 +24,16 @@ type UsageEvent struct {
 	APIKey              string
 	Endpoint            string
 	RequestID           string
+	TraceID             string
+	ExecutionID         string
+	TimestampInferred   bool
+	SessionID           string
+	ParentSessionID     string
+	NodeKind            string
+	IsFork              bool
+	IsCompaction        bool
+	Stream              *bool
+	ResponseModel       string
 	LatencyMs           int64
 	TTFTMs              int64
 	InputTokens         int64 // normalized uncached input
@@ -118,15 +128,19 @@ type APIKeyOverview struct {
 
 // UsageFilter parameterizes all aggregation/listing queries.
 type UsageFilter struct {
-	Range     string // all | today | 4h | 8h | 12h | 24h | 2d | 3d | 4d | 5d | 6d | 7d | 30d | custom
-	Start     time.Time
-	End       time.Time
-	Models    []string
-	Sources   []string
-	AuthIndex string
-	Result    string // "" | success | failed
-	APIKeys   []string
-	RequestID string
+	Range           string // all | today | 4h | 8h | 12h | 24h | 2d | 3d | 4d | 5d | 6d | 7d | 30d | custom
+	Start           time.Time
+	End             time.Time
+	Models          []string
+	Sources         []string
+	AuthIndex       string
+	Result          string // "" | success | failed
+	APIKeys         []string
+	RequestID       string
+	TraceID         string
+	ExecutionID     string
+	SessionID       string
+	ParentSessionID string
 }
 
 // HasRange reports whether the filter requests a bounded window.
@@ -167,6 +181,16 @@ type UsageEventRecord struct {
 	AuthType            string          `json:"auth_type"`
 	Endpoint            string          `json:"endpoint"`
 	RequestID           string          `json:"request_id"`
+	TraceID             string          `json:"trace_id"`
+	ExecutionID         string          `json:"execution_id"`
+	TimestampInferred   bool            `json:"timestamp_inferred"`
+	SessionID           string          `json:"session_id"`
+	ParentSessionID     string          `json:"parent_session_id"`
+	NodeKind            string          `json:"node_kind"`
+	IsFork              bool            `json:"is_fork"`
+	IsCompaction        bool            `json:"is_compaction"`
+	Stream              *bool           `json:"stream,omitempty"`
+	ResponseModel       string          `json:"response_model"`
 	LatencyMs           int64           `json:"latency_ms"`
 	TTFTMs              int64           `json:"ttft_ms"`
 	InputTokens         int64           `json:"input_tokens"`

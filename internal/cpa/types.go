@@ -208,6 +208,15 @@ type UsageRecord struct {
 	AuthType            string          `json:"auth_type"`
 	APIKey              string          `json:"api_key"`
 	RequestID           string          `json:"request_id"`
+	TraceID             string          `json:"trace_id"`
+	ExecutionID         string          `json:"execution_id"`
+	SessionID           string          `json:"session_id"`
+	ParentSessionID     string          `json:"parent_session_id"`
+	NodeKind            string          `json:"node_kind"`
+	IsFork              bool            `json:"is_fork"`
+	IsCompaction        bool            `json:"is_compaction"`
+	Stream              *bool           `json:"stream,omitempty"`
+	ResponseModel       string          `json:"response_model"`
 	ReasoningEffort     string          `json:"reasoning_effort"`
 	ServiceTier         string          `json:"service_tier"`
 	RequestServiceTier  string          `json:"request_service_tier"`

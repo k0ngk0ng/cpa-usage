@@ -10,10 +10,34 @@ CPA v6.10 removed the legacy `/v0/management/usage/{export,import}` HTTP endpoin
 - Consumes CPA token accounting v2 when available, preserving uncached/cache-read/cache-write, total/non-reasoning/reasoning, quality, and unclassified buckets without provider-specific double counting
 - Periodically refreshes auth-files and provider catalogs from CPA management API
 - Reads per-request logs from `CPA_LOG_DIR`, falling back to CPA's authenticated `request-log-by-id` management endpoint when the filesystem is not shared
+- Visualizes request and session usage timelines with execution details, observed timing, session relationships, and JSON export
 - Computes per-model cost from configurable input, output, cache-read, and cache-write price-per-1M-token settings
 - Serves an API + SPA at `/usage/*` (subpath configurable)
 - Optional JWT cookie-based password login
 - Retains usage events indefinitely by default; optional daily 03:00 retention cleanup is configurable
+
+## Usage timeline (0.4.0)
+
+Open **Timeline** or follow **Timeline →** from an event or request log. Choose **Requests** for execution records correlated by `trace_id` (falling back to the legacy `request_id`), or **Sessions** for records with a CPA-reported `session_id`. Unlinked records remain separate. Session details group records by request and link to reported parent and child sessions without inventing span ancestry.
+
+Filter by time, model, credential, API key, result, or an exact trace/request/execution/session/parent-session ID. Filters select matching groups; their summaries and details include all retained records in that group, including successful records after a failed one and records outside the selected time range. Request and session lists are ordered by the latest matching activity. A session view covers that session only; child sessions are opened separately. Unknown session IDs in older data cannot be reconstructed.
+
+The waterfall supports zoom, expandable execution metadata, token/cache breakdowns, estimated per-record cost, failure bodies, and existing request logs. **Export JSON** downloads the entire selected snapshot, including pages not yet displayed. Detail pages contain 200 records at a time and use insertion-ID cursors with a fixed upper bound, so concurrent or late arrivals cannot shift pages. Refresh opens a new snapshot. Retention cleanup can still remove records from an open snapshot.
+
+Timing is deliberately limited to what usage reports: bars run from `timestamp` to `timestamp + max(0, latency_ms)`. The group envelope is observed usage time, not total HTTP duration. Overlap does not prove parallel execution; multiple records can be retries or additional-model accounting. TTFT is displayed as a reported duration, never positioned on the timestamp axis, because it may use a different start or fall back to first-packet timing. Records ingested without a timestamp are labeled as inferred ingest time. Client-side tools, real parent spans, and requests without usage are not synthesized.
+
+Upgrades automatically add nullable metadata columns and correlation indexes to SQLite. Existing events retain their IDs and accounting; the content-derived `event_key` remains the deduplication key. `request_id`, `trace_id`, and `execution_id` are **not** unique database keys. CPA remains unchanged, and all new fields are optional for compatibility with older versions. Already-consumed metadata cannot be recovered from the existing database.
+
+Timeline API examples (under `<APP_BASE_PATH>/api/v1`):
+
+```text
+GET /usage/timelines?mode=request&range=24h&result=failed
+GET /usage/timelines?mode=session&range=all&parent_session_id=<id>
+GET /usage/timelines/detail?key=request%3A<id>
+GET /usage/timelines/detail?key=session%3A<id>&cursor=<next_cursor>&snapshot=<snapshot>
+```
+
+List responses use `items`, `total`, `page`, and `page_size` (20 groups). Detail responses use `summary`, `items`, `snapshot`, and `next_cursor` (zero means the final page). Omit cursor/snapshot for the initial request. Keys are namespaced as `request:<trace-or-request-id>`, `session:<session-id>`, or `event:<event-key>` and must be URL-encoded. `trace_id` searches include legacy request-ID fallback; `request_id` searches match the log request ID exactly. The existing events endpoint also accepts exact `trace_id`, `execution_id`, `session_id`, and `parent_session_id` filters. All timeline APIs use the same authentication and display-name redaction as usage events.
 
 ## Quick start (development)
 
@@ -45,7 +69,7 @@ curl 'http://127.0.0.1:8318/usage/api/v1/usage/overview?range=24h' | jq
 GitHub Releases ship a `cpa-usage_<version>_linux_<arch>.tar.gz` archive (`amd64` and `aarch64`). The accompanying installer reuses the `cliproxy` system user that the CPA installer creates (so cpa-usage and CPA share state under `/home/cliproxy`), drops the binary under `/home/cliproxy/cpa-usage/releases/<ver>`, and writes a systemd unit:
 
 ```bash
-sudo ./cpa-usage-install.sh --version 0.0.1-0
+sudo ./cpa-usage-install.sh --version 0.4.0
 ```
 
 After install, edit `/home/cliproxy/cpa-usage/.env` to populate `CPA_BASE_URL` and `CPA_MANAGEMENT_KEY`, then:
@@ -112,6 +136,8 @@ All endpoints are mounted under `<APP_BASE_PATH>/api/v1`. Protected endpoints re
 | GET | `/usage/overview` | summary + hourly + daily + range-sized 15-minute health grid |
 | GET | `/usage/health` | year request matrix + optional selected-day 5-minute detail |
 | GET | `/usage/analysis` | aggregations by API / model / both |
+| GET | `/usage/timelines` | paginated request/session groups; matching filters select complete retained groups |
+| GET | `/usage/timelines/detail` | observed envelope and cursor-paginated records for one group |
 | GET | `/usage/events` | paginated raw events |
 | GET | `/usage/events/filters` | distinct models + sources |
 | GET | `/usage/credentials` | per-source success/failure rollup |

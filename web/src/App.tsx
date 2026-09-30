@@ -4,6 +4,7 @@ import Login from "./pages/Login";
 import Layout from "./components/Layout";
 import Overview from "./pages/Overview";
 import Analysis from "./pages/Analysis";
+import Timeline from "./pages/Timeline";
 import Events from "./pages/Events";
 import Credentials from "./pages/Credentials";
 import Pricing from "./pages/Pricing";
@@ -39,6 +40,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Overview />} />
           <Route path="/analysis" element={<Analysis />} />
+          <Route path="/timeline" element={<Timeline />} />
           <Route path="/events" element={<Events />} />
           <Route path="/credentials" element={<Credentials />} />
           <Route path="/pricing" element={<Pricing />} />

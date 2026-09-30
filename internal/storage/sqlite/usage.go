@@ -53,6 +53,16 @@ func (s *Store) InsertUsageEvents(ctx context.Context, events []storage.UsageEve
 			APIKey:              e.APIKey,
 			Endpoint:            e.Endpoint,
 			RequestID:           e.RequestID,
+			TraceID:             e.TraceID,
+			ExecutionID:         e.ExecutionID,
+			TimestampInferred:   e.TimestampInferred,
+			SessionID:           e.SessionID,
+			ParentSessionID:     e.ParentSessionID,
+			NodeKind:            e.NodeKind,
+			IsFork:              e.IsFork,
+			IsCompaction:        e.IsCompaction,
+			Stream:              e.Stream,
+			ResponseModel:       e.ResponseModel,
 			LatencyMs:           e.LatencyMs,
 			TTFTMs:              e.TTFTMs,
 			InputTokens:         e.InputTokens,
@@ -201,6 +211,18 @@ func (s *Store) applyFilter(ctx context.Context, f storage.UsageFilter) *gorm.DB
 	if f.RequestID != "" {
 		q = q.Where("request_id = ?", f.RequestID)
 	}
+	if f.TraceID != "" {
+		q = q.Where("trace_id = ? OR (COALESCE(trace_id, '') = '' AND request_id = ?)", f.TraceID, f.TraceID)
+	}
+	if f.ExecutionID != "" {
+		q = q.Where("execution_id = ?", f.ExecutionID)
+	}
+	if f.SessionID != "" {
+		q = q.Where("session_id = ?", f.SessionID)
+	}
+	if f.ParentSessionID != "" {
+		q = q.Where("parent_session_id = ?", f.ParentSessionID)
+	}
 	switch f.Result {
 	case "success":
 		q = q.Where("failed = ?", false)
@@ -287,58 +309,7 @@ func (s *Store) ListUsageEvents(ctx context.Context, f storage.UsageFilter, p st
 		return nil, err
 	}
 
-	items := make([]storage.UsageEventRecord, 0, len(rows))
-	for _, r := range rows {
-		outputTokens := normalizedOutputTotal(r)
-		nonReasoningTokens := normalizedNonReasoning(r)
-		serviceTier := firstNonEmpty(r.ServiceTier, r.RequestServiceTier)
-		generate := true
-		if r.Generate != nil {
-			generate = *r.Generate
-		}
-		items = append(items, storage.UsageEventRecord{
-			EventKey:            r.EventKey,
-			Timestamp:           r.Timestamp,
-			Provider:            r.Provider,
-			ExecutorType:        r.ExecutorType,
-			Model:               r.Model,
-			Alias:               r.Alias,
-			APIGroupKey:         r.APIGroupKey,
-			Source:              r.Source,
-			AuthIndex:           r.AuthIndex,
-			AccessTokenSHA256:   r.AccessTokenSHA256,
-			ClientIP:            r.ClientIP,
-			XForwardedFor:       r.XForwardedFor,
-			UserAgent:           r.UserAgent,
-			AuthType:            r.AuthType,
-			Endpoint:            r.Endpoint,
-			RequestID:           r.RequestID,
-			LatencyMs:           r.LatencyMs,
-			TTFTMs:              r.TTFTMs,
-			InputTokens:         r.InputTokens,
-			OutputTokens:        outputTokens,
-			ReasoningTokens:     r.ReasoningTokens,
-			CachedTokens:        r.CachedTokens,
-			CacheReadTokens:     r.CacheReadTokens,
-			CacheReadPresent:    r.CacheReadPresent,
-			CacheCreationTokens: r.CacheCreationTokens,
-			NonReasoningTokens:  nonReasoningTokens,
-			UnclassifiedTokens:  r.UnclassifiedTokens,
-			TotalTokens:         r.TotalTokens,
-			AccountingVersion:   r.AccountingVersion,
-			AccountingQuality:   normalizedAccountingQuality(r.AccountingQuality),
-			Failed:              r.Failed,
-			Generate:            generate,
-			FailStatusCode:      r.FailStatusCode,
-			FailBody:            r.FailBody,
-			ResponseHeaders:     rawJSON(r.ResponseHeaders),
-			ReasoningEffort:     r.ReasoningEffort,
-			ServiceTier:         serviceTier,
-			RequestServiceTier:  serviceTier,
-			ResponseServiceTier: r.ResponseServiceTier,
-			Cost:                computeCost(r.Model, r.InputTokens, outputTokens, r.CachedTokens, r.CacheCreationTokens, prices),
-		})
-	}
+	items := usageEventRecords(rows, prices)
 	totalPages := int((total + int64(p.PageSize) - 1) / int64(p.PageSize))
 	if totalPages == 0 && total > 0 {
 		totalPages = 1
@@ -1319,4 +1290,70 @@ func trimNonEmpty(in []string) []string {
 		}
 	}
 	return out
+}
+
+func usageEventRecords(rows []usageEventModel, prices map[string]storage.ModelPriceSetting) []storage.UsageEventRecord {
+	items := make([]storage.UsageEventRecord, 0, len(rows))
+	for _, r := range rows {
+		outputTokens := normalizedOutputTotal(r)
+		nonReasoningTokens := normalizedNonReasoning(r)
+		serviceTier := firstNonEmpty(r.ServiceTier, r.RequestServiceTier)
+		generate := true
+		if r.Generate != nil {
+			generate = *r.Generate
+		}
+		items = append(items, storage.UsageEventRecord{
+			EventKey:            r.EventKey,
+			Timestamp:           r.Timestamp,
+			Provider:            r.Provider,
+			ExecutorType:        r.ExecutorType,
+			Model:               r.Model,
+			Alias:               r.Alias,
+			APIGroupKey:         r.APIGroupKey,
+			Source:              r.Source,
+			AuthIndex:           r.AuthIndex,
+			AccessTokenSHA256:   r.AccessTokenSHA256,
+			ClientIP:            r.ClientIP,
+			XForwardedFor:       r.XForwardedFor,
+			UserAgent:           r.UserAgent,
+			AuthType:            r.AuthType,
+			Endpoint:            r.Endpoint,
+			RequestID:           r.RequestID,
+			TraceID:             r.TraceID,
+			ExecutionID:         r.ExecutionID,
+			TimestampInferred:   r.TimestampInferred,
+			SessionID:           r.SessionID,
+			ParentSessionID:     r.ParentSessionID,
+			NodeKind:            r.NodeKind,
+			IsFork:              r.IsFork,
+			IsCompaction:        r.IsCompaction,
+			Stream:              r.Stream,
+			ResponseModel:       r.ResponseModel,
+			LatencyMs:           r.LatencyMs,
+			TTFTMs:              r.TTFTMs,
+			InputTokens:         r.InputTokens,
+			OutputTokens:        outputTokens,
+			ReasoningTokens:     r.ReasoningTokens,
+			CachedTokens:        r.CachedTokens,
+			CacheReadTokens:     r.CacheReadTokens,
+			CacheReadPresent:    r.CacheReadPresent,
+			CacheCreationTokens: r.CacheCreationTokens,
+			NonReasoningTokens:  nonReasoningTokens,
+			UnclassifiedTokens:  r.UnclassifiedTokens,
+			TotalTokens:         r.TotalTokens,
+			AccountingVersion:   r.AccountingVersion,
+			AccountingQuality:   normalizedAccountingQuality(r.AccountingQuality),
+			Failed:              r.Failed,
+			Generate:            generate,
+			FailStatusCode:      r.FailStatusCode,
+			FailBody:            r.FailBody,
+			ResponseHeaders:     rawJSON(r.ResponseHeaders),
+			ReasoningEffort:     r.ReasoningEffort,
+			ServiceTier:         serviceTier,
+			RequestServiceTier:  serviceTier,
+			ResponseServiceTier: r.ResponseServiceTier,
+			Cost:                computeCost(r.Model, r.InputTokens, outputTokens, r.CachedTokens, r.CacheCreationTokens, prices),
+		})
+	}
+	return items
 }

@@ -347,3 +347,20 @@ func TestDecodeCacheReadPresenceDistinguishesExplicitZeroFromOmitted(t *testing.
 		t.Fatal("legacy omitted generate must default true")
 	}
 }
+
+func TestDecodeTimelineMetadataAndLegacyUnknowns(t *testing.T) {
+	event, err := Decode(`{"timestamp":"2026-09-29T12:00:00Z","trace_id":" trace ","execution_id":"exec","request_id":"log","session_id":"session","parent_session_id":"parent","node_kind":"compaction","is_fork":true,"is_compaction":true,"stream":false,"response_model":"served-model"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.TraceID != "trace" || event.ExecutionID != "exec" || event.RequestID != "log" || event.SessionID != "session" || event.ParentSessionID != "parent" || event.NodeKind != "compaction" || !event.IsFork || !event.IsCompaction || event.Stream == nil || *event.Stream || event.ResponseModel != "served-model" {
+		t.Fatalf("metadata lost: %+v", event)
+	}
+	legacy, err := Decode(`{"request_id":"legacy"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacy.TraceID != "" || legacy.ExecutionID != "" || legacy.SessionID != "" || legacy.Stream != nil || !legacy.TimestampInferred {
+		t.Fatalf("invented legacy metadata: %+v", legacy)
+	}
+}

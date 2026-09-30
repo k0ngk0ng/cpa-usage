@@ -35,6 +35,10 @@ type Store interface {
 	ListUsageCredentialStats(ctx context.Context, f UsageFilter) ([]UsageCredentialStat, error)
 	ListUsageAnalysis(ctx context.Context, f UsageFilter, prices map[string]ModelPriceSetting) (*UsageAnalysis, error)
 
+	// Usage timelines
+	ListUsageTimelines(ctx context.Context, f UsageFilter, mode string, p Page) (*TimelinePage, error)
+	UsageTimelineDetail(ctx context.Context, key string, cursor, snapshot uint64, prices map[string]ModelPriceSetting) (*TimelineDetail, error)
+
 	// Pricing
 	ListUsedModels(ctx context.Context) ([]string, error)
 	ListPricing(ctx context.Context) ([]ModelPriceSetting, error)

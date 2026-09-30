@@ -62,6 +62,7 @@ func TestOpenMigratesPreV721Schema(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 
 	for _, column := range []string{
+		"timestamp_inferred", "trace_id", "execution_id", "session_id", "parent_session_id", "node_kind", "is_fork", "is_compaction", "stream", "response_model",
 		"executor_type",
 		"request_service_tier",
 		"response_service_tier",
@@ -84,6 +85,9 @@ func TestOpenMigratesPreV721Schema(t *testing.T) {
 		t.Fatal("model_price_settings missing cache_write_price_per_1m")
 	}
 
+	if !store.db.Migrator().HasIndex(&usageEventModel{}, "idx_usage_timeline_request") {
+		t.Fatal("missing timeline correlation index")
+	}
 	var usage usageEventModel
 	if err := store.db.First(&usage, "event_key = ?", "req-1").Error; err != nil {
 		t.Fatalf("read migrated usage: %v", err)

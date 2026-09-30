@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -40,7 +41,12 @@ func parseFilterFromQuery(c *gin.Context) (usage.Filter, error) {
 	result := c.Query("result")
 	requestID := c.Query("request_id")
 	now := time.Now().In(time.Local)
-	return usage.ParseFilter(rangeKey, startStr, endStr, models, sources, apiKeys, authIndex, result, requestID, now)
+	f, err := usage.ParseFilter(rangeKey, startStr, endStr, models, sources, apiKeys, authIndex, result, requestID, now)
+	f.TraceID = strings.TrimSpace(c.Query("trace_id"))
+	f.ExecutionID = strings.TrimSpace(c.Query("execution_id"))
+	f.SessionID = strings.TrimSpace(c.Query("session_id"))
+	f.ParentSessionID = strings.TrimSpace(c.Query("parent_session_id"))
+	return f, err
 }
 
 func usageOverviewHandler(deps UsageDeps) gin.HandlerFunc {

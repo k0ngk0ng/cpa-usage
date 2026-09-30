@@ -10,6 +10,7 @@ const NAV = [
   { to: "/", label: "Overview", end: true },
   { to: "/analysis", label: "Analysis" },
   { to: "/events", label: "Events" },
+  { to: "/timeline", label: "Timeline" },
   { to: "/credentials", label: "Credentials" },
   { to: "/pricing", label: "Pricing" },
   { to: "/aliases", label: "Aliases" },
@@ -68,7 +69,7 @@ export default function Layout({ children, authRequired, onLogout }: Props) {
   return (
     <div className="min-h-full min-w-0 flex flex-col">
       <header className="border-b border-border bg-panel">
-        <div className="max-w-[1400px] mx-auto px-4 py-3 sm:px-6 sm:py-4 flex flex-wrap items-center gap-x-3 gap-y-3 lg:flex-nowrap lg:gap-6">
+        <div className="max-w-[1400px] mx-auto px-4 py-3 sm:px-6 sm:py-4 flex flex-wrap items-center gap-x-3 gap-y-3 lg:flex-nowrap lg:gap-3">
           <Link to="/" className="shrink-0 whitespace-nowrap text-lg font-semibold tracking-tight text-ink">
             CPA <span className="text-accent">Usage</span>
           </Link>
@@ -80,7 +81,7 @@ export default function Layout({ children, authRequired, onLogout }: Props) {
                 end={item.end}
                 className={({ isActive }) =>
                   clsx(
-                    "min-w-0 truncate rounded-md px-0.5 py-1.5 text-center text-muted transition-colors hover:bg-panel2 hover:text-ink lg:px-3",
+                    "min-w-0 truncate rounded-md px-0.5 py-1.5 text-center text-muted transition-colors hover:bg-panel2 hover:text-ink lg:px-2",
                     isActive && "bg-panel2 text-ink",
                   )
                 }

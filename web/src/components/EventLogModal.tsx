@@ -1,4 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import { timelineKey, timelineURL } from "../lib/timeline";
 import clsx from "clsx";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -223,6 +225,7 @@ export default function EventLogModal({ event, onClose }: Props) {
             </span>
           </div>
           <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+            <Link className="text-xs text-accent border border-border rounded px-2 py-1" to={timelineURL(timelineKey(event))} onClick={onClose}>Timeline</Link>
             <a
               href={downloadHref}
               download
@@ -517,6 +520,15 @@ function eventRecordMap(event: UsageEventRecord): Record<string, string> {
     auth_type: displayValue(event.auth_type),
     endpoint: displayValue(event.endpoint),
     request_id: displayValue(event.request_id),
+    trace_id: displayValue(String(event.trace_id ?? "")),
+    execution_id: displayValue(String(event.execution_id ?? "")),
+    session_id: displayValue(String(event.session_id ?? "")),
+    parent_session_id: displayValue(String(event.parent_session_id ?? "")),
+    node_kind: displayValue(String(event.node_kind ?? "")),
+    is_fork: displayValue(String(event.is_fork ?? "")),
+    is_compaction: displayValue(String(event.is_compaction ?? "")),
+    stream: displayValue(String(event.stream ?? "")),
+    response_model: displayValue(String(event.response_model ?? "")),
     latency_ms: displayValue(`${event.latency_ms} (${formatLatency(event.latency_ms)})`),
     ttft_ms: displayValue(`${event.ttft_ms} (${formatLatency(event.ttft_ms)})`),
     input_tokens: formatNumber(event.input_tokens),

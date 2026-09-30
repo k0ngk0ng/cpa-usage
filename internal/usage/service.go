@@ -42,15 +42,19 @@ func New(store storage.Store, prices *pricing.Service, displays *DisplayResolver
 
 // Filter is the parsed filter input shared by all usage endpoints.
 type Filter struct {
-	Range     string
-	Start     time.Time
-	End       time.Time
-	Models    []string
-	Sources   []string
-	AuthIndex string
-	Result    string
-	APIKeys   []string
-	RequestID string
+	Range           string
+	Start           time.Time
+	End             time.Time
+	Models          []string
+	Sources         []string
+	AuthIndex       string
+	Result          string
+	APIKeys         []string
+	RequestID       string
+	TraceID         string
+	ExecutionID     string
+	SessionID       string
+	ParentSessionID string
 }
 
 // Page mirrors storage.Page but is exposed at the service layer so handlers
@@ -211,14 +215,7 @@ func (s *Service) Events(ctx context.Context, f Filter, p Page) (*storage.UsageE
 	if page == nil {
 		return nil, nil
 	}
-	apiNames, sourceNames := s.lookupCaches(ctx)
-	for i := range page.Items {
-		ev := &page.Items[i]
-		ev.APIGroupDisplay = pickDisplay(apiNames, ev.APIGroupKey)
-		ev.SourceDisplay = pickDisplay(sourceNames, ev.Source)
-		ev.APIGroupKey = redact.APIAlias(ev.APIGroupKey)
-		ev.Source = redact.DisplayName(ev.Source)
-	}
+	s.decorateEvents(ctx, page.Items)
 	return page, nil
 }
 
@@ -342,15 +339,19 @@ func pickDisplay(table map[string]string, key string) string {
 
 func (f Filter) toStorage() storage.UsageFilter {
 	return storage.UsageFilter{
-		Range:     f.Range,
-		Start:     f.Start,
-		End:       f.End,
-		Models:    f.Models,
-		Sources:   f.Sources,
-		AuthIndex: f.AuthIndex,
-		Result:    f.Result,
-		APIKeys:   f.APIKeys,
-		RequestID: f.RequestID,
+		Range:           f.Range,
+		Start:           f.Start,
+		End:             f.End,
+		Models:          f.Models,
+		Sources:         f.Sources,
+		AuthIndex:       f.AuthIndex,
+		Result:          f.Result,
+		APIKeys:         f.APIKeys,
+		RequestID:       f.RequestID,
+		TraceID:         f.TraceID,
+		ExecutionID:     f.ExecutionID,
+		SessionID:       f.SessionID,
+		ParentSessionID: f.ParentSessionID,
 	}
 }
 
@@ -446,4 +447,28 @@ func pageSizeAllowed(size int) bool {
 		}
 	}
 	return false
+}
+
+func (s *Service) decorateEvents(ctx context.Context, items []storage.UsageEventRecord) {
+	apiNames, sourceNames := s.lookupCaches(ctx)
+	for i := range items {
+		ev := &items[i]
+		ev.APIGroupDisplay = pickDisplay(apiNames, ev.APIGroupKey)
+		ev.SourceDisplay = pickDisplay(sourceNames, ev.Source)
+		ev.APIGroupKey = redact.APIAlias(ev.APIGroupKey)
+		ev.Source = redact.DisplayName(ev.Source)
+	}
+}
+
+func (s *Service) Timelines(ctx context.Context, f Filter, mode string, p Page) (*storage.TimelinePage, error) {
+	return s.store.ListUsageTimelines(ctx, f.toStorage(), mode, storage.Page{Page: p.Page, PageSize: p.PageSize})
+}
+
+func (s *Service) TimelineDetail(ctx context.Context, key string, cursor, snapshot uint64) (*storage.TimelineDetail, error) {
+	detail, err := s.store.UsageTimelineDetail(ctx, key, cursor, snapshot, s.pricing.Snapshot())
+	if err != nil {
+		return nil, err
+	}
+	s.decorateEvents(ctx, detail.Items)
+	return detail, nil
 }

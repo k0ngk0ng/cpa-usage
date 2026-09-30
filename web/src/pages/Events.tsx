@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
+import { timelineKey, timelineURL } from "../lib/timeline";
 import FilterBar from "../components/FilterBar";
 import Table, { Column } from "../components/Table";
 import EventLogModal from "../components/EventLogModal";
@@ -115,6 +116,7 @@ export default function EventsPage() {
               <time className="block font-mono" dateTime={r.timestamp} title={timestamp}>
                 {timestamp}
               </time>
+              <Link to={timelineURL(timelineKey(r))} onClick={e => e.stopPropagation()} className="text-[10px] text-accent">Timeline →</Link>
               {hasDetail && (
                 <div className="flex max-w-40 items-center gap-1.5 text-[10px] text-muted">
                   {r.request_id && (
@@ -371,6 +373,7 @@ function MobileEventCard({ event, onOpen }: { event: UsageEventRecord; onOpen: (
         </time>
       </div>
 
+      <Link to={timelineURL(timelineKey(event))} onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()} className="mt-2 inline-block text-xs text-accent">Timeline →</Link>
       <div className="mt-2 min-w-0">
         <div className="[overflow-wrap:anywhere] font-mono text-sm font-medium text-ink">
           {event.model || "—"}

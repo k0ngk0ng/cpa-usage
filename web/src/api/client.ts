@@ -1,4 +1,6 @@
 import type {
+  TimelinePage,
+  TimelineDetail,
   AliasesExport,
   AliasesImportResult,
   APIKeyAlias,
@@ -202,6 +204,13 @@ function buildFacetQuery(filter: Filter, extra: Record<string, string | number |
 }
 
 export const api = {
+  async timelines(filter: Filter, mode: string, page: number, selectors: Record<string, string>, signal?: AbortSignal): Promise<TimelinePage> {
+    return request("/usage/timelines" + buildQuery(filter, { mode, page, ...selectors }), { signal });
+  },
+  async timelineDetail(key: string, cursor = 0, snapshot = 0, signal?: AbortSignal): Promise<TimelineDetail> {
+    return request("/usage/timelines/detail?" + new URLSearchParams({ key, cursor: String(cursor), snapshot: String(snapshot) }), { signal });
+  },
+
   async session(): Promise<Session> {
     return request<Session>("/auth/session");
   },

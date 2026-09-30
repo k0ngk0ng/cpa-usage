@@ -130,6 +130,17 @@ export interface UsageEventRecord {
   auth_type: string;
   endpoint: string;
   request_id: string;
+  trace_id: string;
+  execution_id: string;
+  timestamp_inferred: boolean;
+  session_id: string;
+  parent_session_id: string;
+  node_kind: string;
+  is_fork: boolean;
+  is_compaction: boolean;
+  stream?: boolean;
+  response_model: string;
+
   latency_ms: number;
   ttft_ms: number;
   input_tokens: number;
@@ -350,4 +361,32 @@ export interface AliasesImportResult {
   mode: "merge" | "replace";
   applied: number;
   received: number;
+}
+
+export interface TimelineSummary {
+  key: string;
+  kind: "request" | "session" | "event";
+  last_at_ms: number;
+  started_at_ms: number;
+  ended_at_ms: number;
+  records: number;
+  failed: number;
+  total_tokens: number;
+  model_count: number;
+  model: string;
+  request_count: number;
+}
+
+export interface TimelinePage {
+  items: TimelineSummary[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface TimelineDetail {
+  summary: TimelineSummary;
+  items: UsageEventRecord[];
+  snapshot: number;
+  next_cursor: number;
 }

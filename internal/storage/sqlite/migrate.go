@@ -22,6 +22,16 @@ type usageEventModel struct {
 	APIKey              string    `gorm:"size:128;column:api_key"`
 	Endpoint            string    `gorm:"size:128"`
 	RequestID           string    `gorm:"size:64;column:request_id;index"`
+	TraceID             string    `gorm:"column:trace_id;index"`
+	ExecutionID         string    `gorm:"column:execution_id;index"`
+	TimestampInferred   bool      `gorm:"column:timestamp_inferred"`
+	SessionID           string    `gorm:"column:session_id;index"`
+	ParentSessionID     string    `gorm:"column:parent_session_id;index"`
+	NodeKind            string    `gorm:"column:node_kind"`
+	IsFork              bool      `gorm:"column:is_fork"`
+	IsCompaction        bool      `gorm:"column:is_compaction"`
+	Stream              *bool     `gorm:"column:stream"`
+	ResponseModel       string    `gorm:"column:response_model"`
 	LatencyMs           int64
 	TTFTMs              int64 `gorm:"column:ttft_ms"`
 	InputTokens         int64

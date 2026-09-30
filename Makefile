@@ -1,6 +1,6 @@
 .PHONY: build run tidy test web release-snapshot
 
-VERSION ?= dev
+VERSION ?= $(shell cat VERSION)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
@@ -19,7 +19,7 @@ test:
 	go test ./...
 
 web:
-	cd web && npm ci && npm run build
+	cd web && npm ci && npm test && npm run build
 
 release-snapshot: web
 	goreleaser release --snapshot --clean --skip=publish

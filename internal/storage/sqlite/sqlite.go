@@ -51,6 +51,9 @@ func Open(cfg Config) (*Store, error) {
 	if err := db.AutoMigrate(allModels()...); err != nil {
 		return nil, fmt.Errorf("auto migrate: %w", err)
 	}
+	if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_usage_timeline_request ON usage_events ((" + requestGroupSQL + "), timestamp)").Error; err != nil {
+		return nil, fmt.Errorf("migrate timeline index: %w", err)
+	}
 	return &Store{db: db, retentionDays: cfg.RetentionDays}, nil
 }
 
