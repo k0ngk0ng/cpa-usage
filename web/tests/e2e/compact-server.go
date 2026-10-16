@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/k0ngk0ng/cpa-usage/internal/api"
@@ -32,6 +33,7 @@ func main() {
 	output := `{"object":"response.compaction","output":[` + user + `,` + checkpoint + `]}`
 	done := `{"type":"response.completed","response":{"id":"resp-new","status":"completed","output":[` + user + `,` + checkpoint + `]}}`
 	input := `{"model":"codex-test","input":[` + user + `,` + answer + `,{"type":"compaction_trigger"}]}`
+	largeInput := `{"role":"user","content":"` + strings.Repeat("x", 9<<20) + `"}`
 	frame := func(kind, body string) string {
 		return "Timestamp: 2026-10-16T10:00:00Z\nEvent: websocket." + kind + "\n" + body + "\n"
 	}
@@ -42,6 +44,10 @@ func main() {
 		{"failed", "/v1/responses", input, `{"error":{"message":"Compaction failed"}}`, ""},
 		{"replay", "/v1/responses", `{"input":[` + checkpoint + `,` + user + `]}`, `{"output":[` + answer + `]}`, ""},
 		{"delta", "/v1/responses", `{"previous_response_id":"unknown","input":[{"type":"compaction_trigger"}]}`, done, ""},
+		{"large-normal", "/v1/responses", `{"input":[` + largeInput + `]}`, `{"output":[]}`, ""},
+		{"large-compact", "/v1/responses", `{"input":[` + largeInput + `,{"type":"compaction_trigger"}]}`, output, ""},
+		{"large-output", "/v1/responses", `{"input":"hello"}`, `{"padding":"` + strings.Repeat("x", 9<<20) + `","output":[` + checkpoint + `]}`, ""},
+		{"canceled", "/v1/responses", `{"input":"hello"}`, "", ""},
 	}
 	for i, c := range cases {
 		body := "=== REQUEST INFO ===\nURL: " + c.endpoint + "\n=== REQUEST BODY ===\n" + c.request + "\n"

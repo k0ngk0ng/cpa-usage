@@ -353,7 +353,7 @@ function RequestKindBadge({ event, kind, checking }: { event: UsageEventRecord; 
   const title = value === "compact" ? "Compaction request identified from the endpoint, trigger or new compaction output."
     : value === "contains_compact" ? "This shared WebSocket log contains compaction. The log cannot attribute it to this individual usage record."
     : value === "normal" ? "The retained request and response contain no new compaction operation."
-    : "Request type is not established yet. Logs may be missing, incomplete or too large for background discovery; Refresh retries available evidence.";
+    : "Request type is not established yet. Logs may be missing or incomplete; Refresh retries available evidence.";
   return <span data-request-id={event.request_id} data-request-kind={value || "unknown"} title={title}
     className={positive ? "inline-flex rounded bg-warn/10 px-1.5 py-0.5 text-[10px] font-semibold text-warn" : "text-[10px] text-muted"}>{label}</span>;
 }

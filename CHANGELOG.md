@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.7
+
+- Remove file-size limits and body truncation from Events request-type discovery so large conversation logs and compact triggers near the end are classified.
+- Cover large local and downloaded logs, late compact output, and canceled requests without response evidence with regressions and browser E2E scenarios.
+
 ## 0.4.6
 
 - Show request types automatically in the Events list and mobile cards without opening logs, including Codex v2 compact requests.

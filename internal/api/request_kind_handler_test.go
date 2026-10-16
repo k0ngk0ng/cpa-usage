@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -83,5 +84,91 @@ func TestRequestKindDiscoveryIsBoundedCachedAndSeparateFromEvents(t *testing.T) 
 	protected.ServeHTTP(rr, httptest.NewRequest("POST", "/usage/api/v1/usage/events/request-kinds", strings.NewReader(`{"request_ids":["v2"]}`)))
 	if rr.Code != 401 {
 		t.Fatalf("unguarded discovery: %d", rr.Code)
+	}
+}
+
+// Failure matrix: local/remote logs rejected above 8 MiB, a trigger after a
+// large input truncated away, compaction output after a large response lost,
+// and a canceled upstream with no response incorrectly classified as normal.
+func TestRequestKindDiscoveryReadsEntireLargeLogs(t *testing.T) {
+	padding := strings.Repeat("x", 9<<20)
+	cases := []struct{ id, request, response, want string }{
+		{"large-normal", `{"input":"` + padding + `"}`, `{"output":[]}`, "normal"},
+		{"large-trigger", `{"input":[{"role":"user","content":"` + padding + `"},{"type":"compaction_trigger"}]}`, `{"error":{"message":"failed"}}`, "compact"},
+		{"large-output", `{"input":"hello"}`, `{"padding":"` + padding + `","output":[{"type":"compaction","encrypted_content":"test"}]}`, "compact"},
+		{"canceled", `{"input":"hello"}`, "", "unknown"},
+	}
+	for _, remote := range []bool{false, true} {
+		for _, tc := range cases {
+			name := "local/" + tc.id
+			if remote {
+				name = "remote/" + tc.id
+			}
+			t.Run(name, func(t *testing.T) {
+				dir := t.TempDir()
+				s, err := sqlite.Open(sqlite.Config{Path: filepath.Join(dir, "usage.db")})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer s.Close()
+				ctx := context.Background()
+				_, _, err = s.InsertUsageEvents(ctx, []storage.UsageEvent{{EventKey: tc.id, RequestID: tc.id, Timestamp: time.Now()}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				body := "=== REQUEST BODY ===\n" + tc.request + "\n=== RESPONSE ===\nStatus: 200\n\n" + tc.response + "\n"
+				deps := UsageDeps{Store: s, LogReader: &cpa.LogReader{Dir: dir}}
+				if remote {
+					deps.LogDownloader = requestLogDownloaderFunc(func(_ context.Context, _ string, w io.Writer) (cpa.RequestLogMeta, error) {
+						n, err := io.WriteString(w, body)
+						return cpa.RequestLogMeta{Size: int64(n)}, err
+					})
+				} else if err := os.WriteFile(filepath.Join(dir, "responses-"+tc.id+".log"), []byte(body), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if err := discoverRequestKind(ctx, deps, tc.id); err != nil {
+					t.Fatal(err)
+				}
+				kinds, err := s.RequestKinds(ctx, []string{tc.id})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if kinds[tc.id].Kind != tc.want {
+					t.Fatalf("got %s, want %s", kinds[tc.id].Kind, tc.want)
+				}
+			})
+		}
+	}
+}
+
+// Optional read-only reproduction against the user's original downloaded logs.
+// Only filenames and classifications are logged; raw request data is not copied.
+func TestRequestKindDownloadedSamples(t *testing.T) {
+	dir := os.Getenv("CPA_REQUEST_KIND_SAMPLE_DIR")
+	if dir == "" {
+		t.Skip("CPA_REQUEST_KIND_SAMPLE_DIR is not set")
+	}
+	s, err := sqlite.Open(sqlite.Config{Path: filepath.Join(t.TempDir(), "usage.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	for _, tc := range []struct{ id, want string }{{"33bb917d", "normal"}, {"668df86a", "normal"}, {"7ee7a589", "unknown"}} {
+		_, _, err := s.InsertUsageEvents(ctx, []storage.UsageEvent{{EventKey: tc.id, RequestID: tc.id, Timestamp: time.Now()}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := discoverRequestKind(ctx, UsageDeps{Store: s, LogReader: &cpa.LogReader{Dir: dir}}, tc.id); err != nil {
+			t.Fatal(err)
+		}
+		kinds, err := s.RequestKinds(ctx, []string{tc.id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%s: %s", tc.id, kinds[tc.id].Kind)
+		if kinds[tc.id].Kind != tc.want {
+			t.Errorf("%s: got %s, want %s", tc.id, kinds[tc.id].Kind, tc.want)
+		}
 	}
 }

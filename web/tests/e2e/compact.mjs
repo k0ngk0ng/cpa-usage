@@ -38,6 +38,13 @@ try {
  browser("screenshot",`${dir}/events-auto.png`);
  writeFileSync(`${dir}/events-auto-snapshot.txt`,browser("snapshot"));
  results.push({case:"events-automatic-classification-without-opening-logs",passed:true});
+ // Failure cases: whole-log size cap, input truncation before the trigger,
+ // output truncation before a checkpoint, and missing-response false negatives.
+ for(const [id,kind] of [["large-normal","normal"],["large-compact","compact"],["large-output","compact"],["canceled","unknown"]]) {
+  browser("wait","--fn",`document.querySelector('table [data-request-id="${id}"][data-request-kind="${kind}"]') !== null && !document.querySelector('main [role="status"]')`);
+  results.push({case:`events-${id}`,passed:true});
+ }
+ browser("screenshot",`${dir}/events-large-logs.png`);
  for(const id of ["legacy","v2","ws","failed","delta","replay"]) {
   browser("open",`http://127.0.0.1:18328/usage/events?range=all&request_id=${id}`);
   browser("set","viewport","1280","900");

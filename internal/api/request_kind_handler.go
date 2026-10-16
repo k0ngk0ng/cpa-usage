@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"math"
 	"net/http"
 	"time"
 
@@ -12,8 +13,9 @@ import (
 )
 
 // Separate from the events query so remote log latency cannot block the list.
-// Each request scans at most eight retained logs, each bounded to 8 MiB, with
-// two concurrent batches and a cooldown for unavailable/incomplete evidence.
+// Each request scans at most eight retained logs, with two concurrent batches
+// and a cooldown for unavailable/incomplete evidence. Classification reads
+// entire logs: a compaction trigger may follow a large conversation history.
 func usageRequestKindsHandler(deps UsageDeps) gin.HandlerFunc {
 	slots := make(chan struct{}, 2)
 	var flights singleflight.Group
@@ -94,15 +96,15 @@ func discoverRequestKind(ctx context.Context, deps UsageDeps, id string) error {
 		return nil
 	}
 	result := storage.RequestKind{RequestID: id, Kind: "unknown"}
-	handle, err := resolveEventLog(ctx, deps, id, 8<<20)
+	handle, err := resolveEventLog(ctx, deps, id)
 	if err == nil {
 		defer handle.Close()
-		if handle.fileSize <= 8<<20 {
-			reader := *eventLogReader(deps)
-			reader.MaxBodyBytes = 8 << 20
-			if entry, readErr := reader.Read(handle.path); readErr == nil {
-				result.Kind, result.Complete = cpa.RequestKindFromLog(entry)
-			}
+		reader := *eventLogReader(deps)
+		// Disable body truncation for classification; zero selects the reader's
+		// display default and would lose triggers/output near the end of a log.
+		reader.MaxBodyBytes = math.MaxInt64
+		if entry, readErr := reader.Read(handle.path); readErr == nil {
+			result.Kind, result.Complete = cpa.RequestKindFromLog(entry)
 		}
 	}
 	if ctx.Err() != nil {

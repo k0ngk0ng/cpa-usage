@@ -208,9 +208,10 @@ means the available evidence is insufficient, including missing or incomplete lo
 Usage queue metadata alone does not contain v2 triggers or output.
 
 Events loads cached types without waiting for log downloads, then discovers types
-in batches of up to eight IDs. Each batch has a 12-second deadline, each log is
-limited to 8 MiB, and at most two batches run concurrently. Refresh retries missing
-or incomplete evidence after a five-minute cooldown. SQLite retains established
+in batches of up to eight IDs. Classification reads complete logs without a file
+size limit or body truncation. Each batch has a 12-second deadline, and at most two
+batches run concurrently. Refresh retries missing or incomplete evidence after a
+five-minute cooldown. SQLite retains established
 types across refreshes and restarts, even if the source log disappears; retention
 cleanup removes the cache when no associated usage remains. Session-row badges
 still appear after their logs are opened and inspected.
