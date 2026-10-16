@@ -1,6 +1,7 @@
 import SessionName from "./SessionName";
 import RequestConversation from "./RequestConversation";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { CompactBadge } from "./EventLogModal";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import {
   collectSessionPages,
@@ -29,6 +30,8 @@ export function SessionRequests({
   const [expanded, setExpanded] = useState<Set<string>>(
     () => new Set(originRequest ? [originRequest] : []),
   );
+  const [compactRequests, setCompactRequests] = useState<Set<string>>(() => new Set());
+  const markCompact = useCallback((key: string) => setCompactRequests(current => current.has(key) ? current : new Set([...current, key])), []);
   const selectedRequest = useRef<HTMLElement | null>(null);
   const root = useRef<HTMLElement | null>(null);
   const restorePosition = useRef<(() => void) | null>(null);
@@ -171,6 +174,7 @@ export function SessionRequests({
                   <span className="w-6 shrink-0 text-muted tabular-nums">
                     #{index + 1}
                   </span>
+                  {compactRequests.has(request.key) && <CompactBadge />}
                   <time
                     dateTime={new Date(request.started_at_ms).toISOString()}
                     className="w-14 shrink-0 tabular-nums"
@@ -230,6 +234,7 @@ export function SessionRequests({
                     <RequestConversation
                       requestKey={request.key}
                       snapshot={detail.snapshot}
+                      onCompact={markCompact}
                       focusEvent={
                         request.key === originRequest ? focusEvent : ""
                       }

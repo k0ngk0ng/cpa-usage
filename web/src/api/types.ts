@@ -308,6 +308,10 @@ export interface EventLogEntry {
   api_responses: APIResponseAttempt[];
   response_body: string;
   response_body_truncated: boolean;
+  websocket_timeline?: string;
+  websocket_timeline_truncated?: boolean;
+  api_websocket_timeline?: string;
+  api_websocket_timeline_truncated?: boolean;
 }
 
 export interface EventLogResponse {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
 import { api } from "../api/client";
 import type {
@@ -6,7 +6,8 @@ import type {
   TimelineDetail,
   UsageEventRecord,
 } from "../api/types";
-import EventLogModal, { ChatView, responseToTurn } from "./EventLogModal";
+import EventLogModal, { ChatView, CompactionView, CompactBadge, responseToTurn } from "./EventLogModal";
+import { compactionReports, isCompactEndpoint } from "../lib/compaction";
 import { extractRequestTurns } from "../lib/protocol";
 import { sessionResponse, splitRequestContext } from "../lib/sessionContent";
 import { barPosition, observedEnd, sortTimelineEvents } from "../lib/timeline";
@@ -16,10 +17,12 @@ export default function RequestConversation({
   requestKey,
   snapshot = 0,
   focusEvent = "",
+  onCompact,
 }: {
   requestKey: string;
   snapshot?: number;
   focusEvent?: string;
+  onCompact?: (requestKey: string) => void;
 }) {
   const [detail, setDetail] = useState<TimelineDetail | null>(null);
   const [selected, setSelected] = useState(focusEvent);
@@ -179,6 +182,7 @@ export default function RequestConversation({
             <>
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                 <span className="text-muted">Request input → response</span>
+                {isCompactEndpoint(event.endpoint) && <CompactBadge />}
                 <button className="text-accent" onClick={() => setLog(event)}>
                   Open request log →
                 </button>
@@ -186,6 +190,8 @@ export default function RequestConversation({
               <RequestLogContent
                 key={event.request_id}
                 requestID={event.request_id}
+                endpoint={event.endpoint}
+                onCompact={() => onCompact?.(requestKey)}
               />
             </>
           ) : (
@@ -200,7 +206,7 @@ export default function RequestConversation({
   );
 }
 
-function RequestLogContent({ requestID }: { requestID: string }) {
+function RequestLogContent({ requestID, endpoint, onCompact }: { requestID: string; endpoint?: string; onCompact?: () => void }) {
   const [entry, setEntry] = useState<EventLogEntry | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -228,6 +234,8 @@ function RequestLogContent({ requestID }: { requestID: string }) {
       });
     return () => c.abort();
   }, [requestID, revision]);
+  const compact = useMemo(() => entry ? compactionReports(entry, endpoint) : [], [entry, endpoint]);
+  useEffect(() => { if (compact.length) onCompact?.(); }, [compact, onCompact]);
   if (loading)
     return (
       <p role="status" className="text-xs text-muted">
@@ -247,7 +255,7 @@ function RequestLogContent({ requestID }: { requestID: string }) {
       </p>
     );
   if (!entry) return null;
-  return <RequestResponseContent entry={entry} />;
+  return compact.length ? <CompactionView reports={compact} /> : <RequestResponseContent entry={entry} />;
 }
 
 export function RequestResponseContent({ entry }: { entry: EventLogEntry }) {

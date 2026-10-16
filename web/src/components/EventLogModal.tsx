@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import EventTraceLinks from "./EventTraceLinks";
 import { responseBodyContent } from "../lib/sessionContent";
+import { compactionReports, isCompactEndpoint, type CompactionReport } from "../lib/compaction";
 import clsx from "clsx";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -22,6 +23,7 @@ import type { StreamExtraction, Turn } from "../lib/protocol";
 interface Props {
   event: UsageEventRecord;
   onClose: () => void;
+  onCompact?: (requestID: string) => void;
 }
 
 interface Tab {
@@ -42,7 +44,7 @@ type ModalInteraction =
   | { kind: "drag"; startX: number; startY: number; startRect: ModalRect }
   | { kind: "resize"; startX: number; startY: number; startRect: ModalRect };
 
-export default function EventLogModal({ event, onClose }: Props) {
+export default function EventLogModal({ event, onClose, onCompact }: Props) {
   const [loading, setLoading] = useState(true);
   const [entry, setEntry] = useState<EventLogEntry | null>(null);
   const [missing, setMissing] = useState(false);
@@ -155,6 +157,8 @@ export default function EventLogModal({ event, onClose }: Props) {
   }, [event.request_id]);
 
   const tabs: Tab[] = useMemo(() => buildTabs(entry, event), [entry, event]);
+  const compact = useMemo(() => isCompactEndpoint(event.endpoint) || !!(entry && compactionReports(entry, event.endpoint).length), [entry, event.endpoint]);
+  useEffect(() => { if (compact) onCompact?.(event.request_id); }, [compact, onCompact, event.request_id]);
 
   // If a previously-selected tab disappears (e.g., entry reloaded with fewer
   // attempts), fall back to the first tab.
@@ -217,6 +221,7 @@ export default function EventLogModal({ event, onClose }: Props) {
         >
           <div className="min-w-0 flex-1 sm:flex sm:items-baseline sm:gap-3">
             <h2 className="whitespace-nowrap text-sm font-semibold">Request log</h2>
+            {compact && <CompactBadge />}
             <span className="mt-0.5 block truncate font-mono text-[10px] text-muted sm:mt-0 sm:text-xs">
               {event.request_id}
             </span>
@@ -410,6 +415,7 @@ function LoadingLogView({
 function buildTabs(entry: EventLogEntry | null, event: UsageEventRecord): Tab[] {
   if (!entry) return [];
   const tabs: Tab[] = [];
+  const compact = compactionReports(entry, event.endpoint);
 
   tabs.push({
     id: "info",
@@ -477,10 +483,14 @@ function buildTabs(entry: EventLogEntry | null, event: UsageEventRecord): Tab[] 
       badge,
       render: () => (
         <Panel>
-          <APIResponsesView attempts={responses} />
+          <APIResponsesView attempts={responses} compactEntry={compact.length ? entry : undefined} endpoint={event.endpoint} />
         </Panel>
       ),
     });
+  }
+
+  if (!responses.length && compact.length) {
+    tabs.push({ id: "response", label: "Response", render: () => <Panel><CompactionView reports={compact} /></Panel> });
   }
 
   tabs.push({
@@ -491,11 +501,11 @@ function buildTabs(entry: EventLogEntry | null, event: UsageEventRecord): Tab[] 
       : undefined,
     render: () => (
       <Panel>
-        <FinalChatView
+        {compact.length ? <CompactionView reports={compact} /> : <FinalChatView
           requestRaw={entry.request_body}
           responseRaw={finalResponseBody(entry)}
           responseTruncated={entry.response_body_truncated}
-        />
+        />}
       </Panel>
     ),
   });
@@ -563,7 +573,7 @@ function displayValue(value: string | undefined | null): string {
   return v || "—";
 }
 
-function APIResponsesView({ attempts }: { attempts: APIResponseAttempt[] }) {
+function APIResponsesView({ attempts, compactEntry, endpoint }: { attempts: APIResponseAttempt[]; compactEntry?: EventLogEntry; endpoint?: string }) {
   return (
     <div className="space-y-4">
       {attempts.map((attempt, index) => (
@@ -582,19 +592,20 @@ function APIResponsesView({ attempts }: { attempts: APIResponseAttempt[] }) {
               ) : null}
             </div>
           )}
-          <APIResponseAttemptView attempt={attempt} />
+          <APIResponseAttemptView attempt={attempt} compactEntry={compactEntry} endpoint={endpoint} />
         </div>
       ))}
     </div>
   );
 }
 
-function APIResponseAttemptView({ attempt }: { attempt: APIResponseAttempt }) {
+function APIResponseAttemptView({ attempt, compactEntry, endpoint }: { attempt: APIResponseAttempt; compactEntry?: EventLogEntry; endpoint?: string }) {
   const meta: Record<string, string> = {};
   if (attempt.timestamp) meta.Timestamp = attempt.timestamp;
   if (attempt.status) meta.Status = String(attempt.status);
   const hasHeaders = Object.keys(attempt.headers || {}).length > 0;
   const hasBody = (attempt.body || "").trim().length > 0;
+  const compact = compactEntry ? compactionReports({ ...compactEntry, websocket_timeline: "", api_websocket_timeline: "", response_body: "", api_responses: [attempt] }, endpoint) : [];
   return (
     <>
       {Object.keys(meta).length > 0 && (
@@ -627,11 +638,51 @@ function APIResponseAttemptView({ attempt }: { attempt: APIResponseAttempt }) {
               </span>
             )}
           </Label>
-          <BodyView raw={attempt.body} kind="response" />
+          {compact.length ? <CompactionView reports={compact} /> : <BodyView raw={attempt.body} kind="response" />}
         </div>
       )}
     </>
   );
+}
+
+export function CompactBadge() {
+  return <span className="inline-flex shrink-0 rounded bg-warn/10 px-1.5 py-0.5 text-[10px] font-semibold text-warn">Compact</span>;
+}
+
+export function CompactionView({ reports }: { reports: CompactionReport[] }) {
+  const turns = (items: Record<string, unknown>[]) => extractRequestTurns(JSON.stringify({ input: items })) || [];
+  return <div className="min-w-0 space-y-5">
+    {reports.map((report, index) => <section key={index} className="min-w-0 space-y-3" aria-label="Compaction result">
+      <div className="flex flex-wrap items-center gap-2">
+        <CompactBadge />
+        <h4 className="text-sm font-semibold">Compaction result{report.exchange ? ` · exchange ${report.exchange}` : ""}</h4>
+        <span className="text-[11px] text-muted">{report.reason === "trigger" ? "compaction_trigger" : report.reason === "endpoint" ? "responses/compact" : report.reason === "response" ? "response.compaction" : "New compaction output"}</span>
+      </div>
+      {report.upstream && <p className="text-xs text-warn">Upstream result only. The final client response is unavailable for this view.</p>}
+      {report.truncated && <p className="text-xs text-warn">The available log is truncated. Compaction completion and range cannot be verified.</p>}
+      {!report.completed && <p className="text-xs text-warn">No completed compaction result was retained. The request may have failed or the log may be incomplete.</p>}
+      <p className="text-xs text-muted">{report.completed ? "Returned context" : "Observed output"} · {report.output.length} items. Message roles and output order are preserved.</p>
+      {report.output.length > 0 && <ChatView turns={turns(report.output)} contentOnly />}
+      {report.comparisonAvailable ? <>
+        <p className="text-xs text-muted">{report.input.length} input items → {report.output.length} output items · {report.retained.length} retained · {report.replaced.length} compacted / replaced.</p>
+        <p className="text-[11px] text-muted">Comparison shows input items no longer present verbatim in the returned context. An encrypted summary does not reveal which individual details it preserved.</p>
+        <details>
+          <summary className="cursor-pointer text-xs font-semibold">Compacted / replaced input · {report.replaced.length} items</summary>
+          <div className="mt-2"><ChatView turns={turns(report.replaced)} contentOnly /></div>
+        </details>
+        <details>
+          <summary className="cursor-pointer text-xs text-muted">Retained input · {report.retained.length} items</summary>
+          <div className="mt-2"><ChatView turns={turns(report.retained)} contentOnly /></div>
+        </details>
+      </> : <>
+        <p className="text-xs text-muted">Compression range unavailable: this log does not establish a complete input and replacement context. Referenced server history and inline output deltas cannot be compared as full transcripts.</p>
+        {report.input.length > 0 && <details><summary className="cursor-pointer text-xs text-muted">Available input · {report.input.length} items</summary><div className="mt-2"><ChatView turns={turns(report.input)} contentOnly /></div></details>}
+      </>}
+      <details><summary className="cursor-pointer text-xs text-muted">Raw request / response</summary>
+        <div className="mt-2 space-y-2"><Label>Request</Label><CodeBlock text={report.requestRaw} /><Label>Response</Label><CodeBlock text={report.responseRaw} /></div>
+      </details>
+    </section>)}
+  </div>;
 }
 
 // Panel is the fixed-height content area. The modal body has h-full, the panel
@@ -1685,6 +1736,16 @@ function StructuredContentPart({
   }
   if (type === "encrypted_content") {
     return <EncryptedContentPart part={part} />;
+  }
+  if (type === "compaction" || type === "compaction_summary") {
+    const summary = typeof part.summary === "string" ? part.summary : reasoningText(part);
+    return <div className="space-y-2">
+      <div className="chat-hidden-part"><span className="part-type-badge">{type}</span><span>{part.encrypted_content ? "Encrypted compaction · plaintext is not available in the log" : "Compaction summary"}</span></div>
+      {summary && <MarkdownContent text={summary} className="chat-body prose-md" />}
+    </div>;
+  }
+  if (type === "compaction_trigger") {
+    return <div className="chat-hidden-part"><span className="part-type-badge">compaction_trigger</span><span>Request to compact context</span></div>;
   }
   if (type === "thinking" || type === "reasoning") {
     return type === "reasoning" ? <ReasoningPart part={part} /> : <ThinkingPart part={part} type={type} />;

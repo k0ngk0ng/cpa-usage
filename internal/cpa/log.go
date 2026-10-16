@@ -43,15 +43,19 @@ type APIResponse struct {
 
 // LogEntry is the structured view we hand to the API layer.
 type LogEntry struct {
-	File              string            `json:"file"`
-	FileSizeBytes     int64             `json:"file_size_bytes"`
-	Info              map[string]string `json:"info"`
-	Headers           map[string]string `json:"headers"`
-	RequestBody       string            `json:"request_body"`
-	RequestTruncated  bool              `json:"request_body_truncated"`
-	APIResponses      []APIResponse     `json:"api_responses"`
-	ResponseBody      string            `json:"response_body"`
-	ResponseTruncated bool              `json:"response_body_truncated"`
+	File                          string            `json:"file"`
+	FileSizeBytes                 int64             `json:"file_size_bytes"`
+	Info                          map[string]string `json:"info"`
+	Headers                       map[string]string `json:"headers"`
+	RequestBody                   string            `json:"request_body"`
+	RequestTruncated              bool              `json:"request_body_truncated"`
+	APIResponses                  []APIResponse     `json:"api_responses"`
+	ResponseBody                  string            `json:"response_body"`
+	ResponseTruncated             bool              `json:"response_body_truncated"`
+	WebsocketTimeline             string            `json:"websocket_timeline,omitempty"`
+	WebsocketTimelineTruncated    bool              `json:"websocket_timeline_truncated,omitempty"`
+	APIWebsocketTimeline          string            `json:"api_websocket_timeline,omitempty"`
+	APIWebsocketTimelineTruncated bool              `json:"api_websocket_timeline_truncated,omitempty"`
 }
 
 var (
@@ -170,6 +174,8 @@ func (r *LogReader) Read(path string) (*LogEntry, error) {
 	var (
 		reqBuf      strings.Builder
 		respBuf     strings.Builder
+		wsBuf       strings.Builder
+		apiWSBuf    strings.Builder
 		reqTrunc    bool
 		respTrunc   bool
 		headerBytes int64
@@ -202,6 +208,8 @@ func (r *LogReader) Read(path string) (*LogEntry, error) {
 					section = sectionRequest
 				case marker == sectionResponse:
 					section = sectionResponse
+				case marker == "WEBSOCKET TIMELINE", marker == "API WEBSOCKET TIMELINE":
+					section = marker
 				case strings.HasPrefix(marker, "API RESPONSE"):
 					section = sectionAPIResponse
 					respSub = respSubInfo
@@ -238,6 +246,15 @@ func (r *LogReader) Read(path string) (*LogEntry, error) {
 							reqBuf.WriteString(line)
 						}
 					}
+				case "WEBSOCKET TIMELINE":
+					appendLogBody(&wsBuf, &entry.WebsocketTimelineTruncated, line, maxBody)
+				case "API WEBSOCKET TIMELINE":
+					if key, value, ok := splitKV(trimmed); ok {
+						if masked := redactHeader(key, value); masked != value {
+							line = key + ": " + masked + "\n"
+						}
+					}
+					appendLogBody(&apiWSBuf, &entry.APIWebsocketTimelineTruncated, line, maxBody)
 				case sectionResponse:
 					if !respTrunc {
 						remaining := maxBody - int64(respBuf.Len())
@@ -310,7 +327,22 @@ func (r *LogReader) Read(path string) (*LogEntry, error) {
 	entry.RequestTruncated = reqTrunc
 	entry.ResponseBody = strings.TrimRight(respBuf.String(), "\n")
 	entry.ResponseTruncated = respTrunc
+	entry.WebsocketTimeline = strings.TrimRight(wsBuf.String(), "\n")
+	entry.APIWebsocketTimeline = strings.TrimRight(apiWSBuf.String(), "\n")
 	return entry, nil
+}
+
+func appendLogBody(buf *strings.Builder, truncated *bool, line string, limit int64) {
+	if *truncated {
+		return
+	}
+	remaining := limit - int64(buf.Len())
+	if int64(len(line)) > remaining {
+		buf.WriteString(line[:remaining])
+		*truncated = true
+	} else {
+		buf.WriteString(line)
+	}
 }
 
 // parseSectionMarker returns the inner name (e.g. "REQUEST INFO") if the line

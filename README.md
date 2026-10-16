@@ -181,6 +181,37 @@ Common query params: `range=all|today|4h|8h|12h|24h|2d|3d|4d|5d|6d|7d|30d|custom
 
 ## Architecture
 
+### Codex compaction logs
+
+Request logs recognize both `/responses/compact` and v2 `response.create`
+requests with `input[].type = "compaction_trigger"`. New `compaction` or
+`compaction_summary` output items also identify compaction. Replaying an existing
+checkpoint, configuring automatic compaction, or CPA's `is_compaction` session
+continuation flag alone does not identify a new compact request.
+
+Response, Final and session request details show the returned context in order,
+with original message roles. Complete replacement transcripts can be compared
+with the recorded input to show retained and compacted/replaced items. This
+comparison reports what disappeared verbatim, not which details survived inside
+an encrypted summary. Missing history, `previous_response_id`, incomplete logs
+and automatic inline output deltas do not establish a complete compression range.
+Encrypted summaries remain opaque; readable summaries are shown when logged.
+
+WebSocket timeline sections are retained with size limits. Each compact exchange
+is labelled separately, and upstream-only results are identified. V2 badges on
+event and session rows appear once their log is opened and inspected; usage queue
+metadata alone does not contain the trigger or output needed to classify them.
+
+Run the reproducible browser check from the repository root with
+`node web/tests/e2e/compact.mjs` (requires installed Go, web dependencies and
+`agent-browser` with Chrome; port 18328 must be available). It builds the production
+UI and runs the real HTTP API, SQLite and CPA log reader against synthetic
+fixtures. Results, screenshots and accessibility snapshots are written under
+`.cache/compact-e2e/`. Parser regressions run with `npm --prefix web test` and
+`go test ./internal/cpa`.
+
+### Data flow
+
 ```
 CPA (Redis SUBSCRIBE + LPOP backlog on tcp/8317)
         │

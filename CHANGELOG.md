@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.5
+
+- Recognize Codex v2 compaction triggers and new compaction output alongside the legacy `/responses/compact` endpoint; exclude replayed checkpoints and session continuation flags from request classification.
+- Preserve bounded downstream and upstream WebSocket timelines, with credential header masking, and label each observed compact exchange.
+- Show returned context, retained items and compacted/replaced input in Response, Final and session request details. Keep encrypted summaries opaque and report unavailable ranges for missing history, incomplete logs and inline output deltas.
+- Retain Compact badges on event and session rows after their logs are inspected.
+- Add parser regressions and eight reproducible browser E2E scenarios covering legacy/v2 requests, WebSocket exchanges, failures, missing history, replay and mobile/session labels.
+
 ## 0.4.4
 
 - Restore request timing bars inside compact session rows, using aligned columns and a shared full-session time scale.

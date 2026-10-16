@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import EventTraceLinks from "../components/EventTraceLinks";
 import FilterBar from "../components/FilterBar";
 import Table, { Column } from "../components/Table";
-import EventLogModal from "../components/EventLogModal";
+import EventLogModal, { CompactBadge } from "../components/EventLogModal";
+import { isCompactEndpoint } from "../lib/compaction";
 import { api } from "../api/client";
 import { todayFilter, useFilter } from "../hooks/useFilter";
 import { useRefreshTick } from "../lib/refresh";
@@ -26,6 +27,8 @@ export default function EventsPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [selected, setSelected] = useState<UsageEventRecord | null>(null);
+  const [compactRequests, setCompactRequests] = useState<Set<string>>(() => new Set());
+  const markCompact = useCallback((id: string) => setCompactRequests(current => current.has(id) ? current : new Set([...current, id])), []);
   const [autoOpenedRequestId, setAutoOpenedRequestId] = useState("");
   const tick = useRefreshTick();
 
@@ -165,6 +168,7 @@ export default function EventsPage() {
       cellClassName: "max-w-36",
       cell: (r) => (
         <span className="block truncate" title={r.endpoint}>
+          {(isCompactEndpoint(r.endpoint) || compactRequests.has(r.request_id)) && <CompactBadge />}{" "}
           {r.endpoint || "—"}
         </span>
       ),
@@ -262,6 +266,7 @@ export default function EventsPage() {
           rows={rows}
           loading={loading && !data}
           onSelect={setSelected}
+          compactRequests={compactRequests}
         />
       </div>
       <div className="hidden xl:block">
@@ -288,7 +293,7 @@ export default function EventsPage() {
       />
 
       {selected && (
-        <EventLogModal event={selected} onClose={() => setSelected(null)} />
+        <EventLogModal event={selected} onClose={() => setSelected(null)} onCompact={markCompact} />
       )}
     </div>
   );
@@ -298,10 +303,12 @@ function MobileEventList({
   rows,
   loading,
   onSelect,
+  compactRequests,
 }: {
   rows: UsageEventRecord[];
   loading: boolean;
   onSelect: (event: UsageEventRecord) => void;
+  compactRequests: Set<string>;
 }) {
   if (loading) {
     return (
@@ -323,6 +330,7 @@ function MobileEventList({
         <MobileEventCard
           key={eventReactKey(event)}
           event={event}
+          compact={isCompactEndpoint(event.endpoint) || compactRequests.has(event.request_id)}
           onOpen={() => onSelect(event)}
         />
       ))}
@@ -330,7 +338,7 @@ function MobileEventList({
   );
 }
 
-function MobileEventCard({ event, onOpen }: { event: UsageEventRecord; onOpen: () => void }) {
+function MobileEventCard({ event, onOpen, compact }: { event: UsageEventRecord; onOpen: () => void; compact: boolean }) {
   const canOpen = Boolean(event.request_id);
   const activate = () => {
     if (canOpen) onOpen();
@@ -369,6 +377,7 @@ function MobileEventCard({ event, onOpen }: { event: UsageEventRecord; onOpen: (
             Result only
           </span>
         )}
+        {compact && <CompactBadge />}
         <time className="shrink-0 font-mono text-[10px] text-muted" dateTime={event.timestamp}>
           {compactTimestamp(event.timestamp)}
         </time>
