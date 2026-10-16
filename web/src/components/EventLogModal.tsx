@@ -656,12 +656,12 @@ export function CompactionView({ reports }: { reports: CompactionReport[] }) {
       <div className="flex flex-wrap items-center gap-2">
         <CompactBadge />
         <h4 className="text-sm font-semibold">Compaction result{report.exchange ? ` · exchange ${report.exchange}` : ""}</h4>
-        <span className="text-[11px] text-muted">{report.reason === "trigger" ? "compaction_trigger" : report.reason === "endpoint" ? "responses/compact" : report.reason === "response" ? "response.compaction" : "New compaction output"}</span>
+        <span className="text-[11px] text-muted">{report.reason === "trigger" ? "compaction_trigger" : report.reason === "endpoint" ? "responses/compact" : report.reason === "metadata" ? "Codex request_kind: compaction" : report.reason === "prompt" ? "Context checkpoint prompt" : report.reason === "response" ? "response.compaction" : "New compaction output"}</span>
       </div>
       {report.upstream && <p className="text-xs text-warn">Upstream result only. The final client response is unavailable for this view.</p>}
       {report.truncated && <p className="text-xs text-warn">The available log is truncated. Compaction completion and range cannot be verified.</p>}
       {!report.completed && <p className="text-xs text-warn">No completed compaction result was retained. The request may have failed or the log may be incomplete.</p>}
-      <p className="text-xs text-muted">{report.completed ? "Returned context" : "Observed output"} · {report.output.length} items. Message roles and output order are preserved.</p>
+      <p className="text-xs text-muted">{report.completed ? report.textSummary ? "Returned summary" : "Returned context" : "Observed output"} · {report.output.length} items. Message roles and output order are preserved.</p>
       {report.output.length > 0 && <ChatView turns={turns(report.output)} contentOnly />}
       {report.comparisonAvailable ? <>
         <p className="text-xs text-muted">{report.input.length} input items → {report.output.length} output items · {report.retained.length} retained · {report.replaced.length} compacted / replaced.</p>
@@ -674,6 +674,9 @@ export function CompactionView({ reports }: { reports: CompactionReport[] }) {
           <summary className="cursor-pointer text-xs text-muted">Retained input · {report.retained.length} items</summary>
           <div className="mt-2"><ChatView turns={turns(report.retained)} contentOnly /></div>
         </details>
+      </> : report.textSummary ? <>
+        <p className="text-xs text-muted">This response is a handoff summary. The log shows the input submitted for summarization, but does not establish which messages the client retained alongside the summary.</p>
+        {report.input.length > 0 && <details><summary className="cursor-pointer text-xs text-muted">Input submitted for summarization · {report.input.length} items</summary><div className="mt-2"><ChatView turns={turns(report.input)} contentOnly /></div></details>}
       </> : <>
         <p className="text-xs text-muted">Compression range unavailable: this log does not establish a complete input and replacement context. Referenced server history and inline output deltas cannot be compared as full transcripts.</p>
         {report.input.length > 0 && <details><summary className="cursor-pointer text-xs text-muted">Available input · {report.input.length} items</summary><div className="mt-2"><ChatView turns={turns(report.input)} contentOnly /></div></details>}

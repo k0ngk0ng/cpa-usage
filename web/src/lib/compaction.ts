@@ -2,7 +2,8 @@ import type { EventLogEntry } from "../api/types";
 
 type Item = Record<string, unknown>;
 export interface CompactionReport {
-  reason: "endpoint" | "trigger" | "response" | "output";
+  reason: "endpoint" | "trigger" | "metadata" | "prompt" | "response" | "output";
+  textSummary: boolean;
   exchange?: number;
   upstream: boolean;
   completed: boolean;
@@ -36,6 +37,39 @@ export function isCompactionItem(item: Item): boolean {
   return item.type === "compaction" || item.type === "compaction_summary";
 }
 function items(value: unknown): Item[] { return Array.isArray(value) ? value.filter(record) : []; }
+
+const checkpointPrompt = `You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.
+
+Include:
+- Current progress and key decisions made
+- Important context, constraints, or user preferences
+- What remains to be done (clear next steps)
+- Any critical data, examples, or references needed to continue
+
+Be concise, structured, and focused on helping the next LLM seamlessly continue the work.`;
+
+function checkpointInstruction(item: Item): boolean {
+  if (item.role !== "user" || (item.type && item.type !== "message")) return false;
+  const content = item.content;
+  const parts = items(content);
+  if (typeof content !== "string" && (!Array.isArray(content) || parts.length !== content.length || parts.some(part => !["input_text", "text"].includes(String(part.type))))) return false;
+  const text = typeof content === "string" ? content : parts.map(part => part.text || "").join("\n");
+  return text.replace(/\r\n/g, "\n").trim() === checkpointPrompt;
+}
+
+function compactionMetadata(request: Item | null, headers: Record<string, string>): boolean {
+  const metadata = record(request?.client_metadata) ? request.client_metadata : {};
+  return [...Object.entries(headers), ...Object.entries(metadata)].some(([key, value]) => {
+    if (key.toLowerCase() !== "x-codex-turn-metadata") return false;
+    const parsed = typeof value === "string" ? parse(value) : value;
+    return record(parsed) && parsed.request_kind === "compaction";
+  });
+}
+
+function readableSummary(item: Item): boolean {
+  if (item.role !== "assistant" || (item.type && item.type !== "message")) return false;
+  return typeof item.content === "string" ? !!item.content.trim() : items(item.content).some(part => ["output_text", "text"].includes(String(part.type)) && typeof part.text === "string" && !!part.text.trim());
+}
 
 // Only explicit terminal events establish completion. An output_item.done can
 // precede a failed/disconnected response; it is useful evidence, not success.
@@ -79,20 +113,23 @@ function identity(item: Item): string {
   return JSON.stringify(canonical(value));
 }
 
-function report(requestRaw: string, responseRaw: string, endpoint: string, truncated: boolean, upstream: boolean): CompactionReport | null {
+function report(requestRaw: string, responseRaw: string, endpoint: string, truncated: boolean, upstream: boolean, headers: Record<string, string> = {}): CompactionReport | null {
   const request = parse(requestRaw);
   const rawInput = typeof request?.input === "string" ? [{ role: "user", content: request.input }] : items(request?.input);
   const trigger = rawInput.some(item => item.type === "compaction_trigger");
-  const input = rawInput.filter(item => item.type !== "compaction_trigger");
+  const prompt = rawInput.length > 0 && checkpointInstruction(rawInput[rawInput.length - 1]);
+  const input = rawInput.filter((item, index) => item.type !== "compaction_trigger" && !(prompt && index === rawInput.length - 1));
   const result = response(responseRaw);
   const existing = new Set(input.filter(isCompactionItem).map(identity));
   const newCheckpoint = result.output.some(item => isCompactionItem(item) && !existing.has(identity(item)));
-  const reason = isCompactEndpoint(endpoint) ? "endpoint" : trigger ? "trigger" : result.compactObject ? "response" : newCheckpoint ? "output" : null;
+  const reason = isCompactEndpoint(endpoint) ? "endpoint" : trigger ? "trigger" : compactionMetadata(request, headers) ? "metadata" : prompt ? "prompt" : result.compactObject ? "response" : newCheckpoint ? "output" : null;
   if (!reason) return null;
-  const completed = result.completed && newCheckpoint && !truncated;
+  const textSummary = (reason === "metadata" || reason === "prompt") && !newCheckpoint;
+  const output = textSummary ? result.output.filter(readableSummary) : result.output;
+  const completed = result.completed && (newCheckpoint || (textSummary && output.length > 0)) && !truncated;
   // Automatic inline compaction can return a delta with a normal answer, not
   // a replacement transcript. Never subtract that delta from the input.
-  const comparisonAvailable = completed && !!request && input.length > 0 && !request.previous_response_id && reason !== "output";
+  const comparisonAvailable = completed && !textSummary && !!request && input.length > 0 && !request.previous_response_id && reason !== "output";
   const retained: Item[] = [], replaced: Item[] = [];
   if (comparisonAvailable) {
     const counts = new Map<string, number>();
@@ -102,7 +139,7 @@ function report(requestRaw: string, responseRaw: string, endpoint: string, trunc
       if (count) { retained.push(item); counts.set(key, count - 1); } else replaced.push(item);
     }
   }
-  return { reason, upstream, completed, comparisonAvailable, input, output: result.output, retained, replaced, requestRaw, responseRaw, truncated };
+  return { reason, textSummary, upstream, completed, comparisonAvailable, input, output, retained, replaced, requestRaw, responseRaw, truncated };
 }
 
 function websocketReports(timeline: string, truncated: boolean, upstream: boolean): CompactionReport[] {
@@ -131,7 +168,7 @@ export function compactionReports(entry: EventLogEntry, endpoint = ""): Compacti
   if (!final && !last && upstream.length) return upstream;
   const raw = final ? entry.response_body : last?.status ? `Status: ${last.status}\n\n${last.body}` : last?.body || "";
   const found = report(entry.request_body, raw, entry.info?.URL || endpoint,
-    !!entry.request_body_truncated || (final ? !!entry.response_body_truncated : !!last?.body_truncated), !final && !!last);
+    !!entry.request_body_truncated || (final ? !!entry.response_body_truncated : !!last?.body_truncated), !final && !!last, entry.headers || {});
   if (found) return [found];
   return upstream;
 }

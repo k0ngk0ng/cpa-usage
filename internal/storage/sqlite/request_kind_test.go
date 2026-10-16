@@ -54,3 +54,68 @@ func TestRequestKindsPersistWithoutMergingUsage(t *testing.T) {
 		t.Fatalf("orphan cache: %d %v", n, err)
 	}
 }
+
+// Failure cases: pre-upgrade Normal remains definitive, old Unknown cooldown
+// blocks rescanning, unavailable rereads resurrect stale Normal, and previously
+// captured Compact evidence disappears when its source log is no longer present.
+func TestRequestKindOldCacheIsReclassified(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old-kinds.db")
+	s, err := Open(Config{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for _, kind := range []string{"normal", "unknown", "compact", "contains_compact"} {
+		_, _, err = s.InsertUsageEvents(ctx, []storage.UsageEvent{{EventKey: kind, RequestID: kind, Timestamp: time.Now()}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Omit the version column exactly as v0.4.7 did.
+		err = s.db.Exec("INSERT INTO request_log_kinds (request_id, kind, complete, checked_at) VALUES (?, ?, ?, ?)", kind, kind, kind != "unknown", time.Now()).Error
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(Config{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	kinds, err := s.RequestKinds(ctx, []string{"normal", "unknown", "compact", "contains_compact"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"normal", "unknown"} {
+		if k := kinds[id]; k.Kind != "unknown" || k.Complete || !k.CheckedAt.IsZero() {
+			t.Fatalf("stale %s: %+v", id, k)
+		}
+	}
+	for _, id := range []string{"compact", "contains_compact"} {
+		if k := kinds[id]; k.Kind != id || !k.Complete {
+			t.Fatalf("lost positive: %+v", k)
+		}
+	}
+	if err = s.SaveRequestKind(ctx, storage.RequestKind{RequestID: "normal", Kind: "unknown"}); err != nil {
+		t.Fatal(err)
+	}
+	kinds, err = s.RequestKinds(ctx, []string{"normal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if k := kinds["normal"]; k.Kind != "unknown" || k.Complete || k.CheckedAt.IsZero() {
+		t.Fatalf("stale Normal resurrected: %+v", k)
+	}
+	if err = s.SaveRequestKind(ctx, storage.RequestKind{RequestID: "normal", Kind: "compact", Complete: true}); err != nil {
+		t.Fatal(err)
+	}
+	kinds, err = s.RequestKinds(ctx, []string{"normal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if k := kinds["normal"]; k.Kind != "compact" || !k.Complete {
+		t.Fatalf("new evidence not cached: %+v", k)
+	}
+}

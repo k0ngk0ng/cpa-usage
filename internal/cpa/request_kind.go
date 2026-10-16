@@ -23,7 +23,7 @@ func RequestKindFromLog(entry *LogEntry) (kind string, complete bool) {
 		return "unknown", false // The connection transcript can still grow.
 	}
 	request := kindObject(entry.RequestBody)
-	if hasCompactionTrigger(request) {
+	if hasCompactionTrigger(request) || textCompactionIntent(request, entry.Headers) {
 		return "compact", true
 	}
 	existing := checkpointSet(request["input"])
@@ -158,7 +158,7 @@ func websocketHasCompaction(raw string) bool {
 				payload = body
 			}
 			request := kindObject(payload)
-			if hasCompactionTrigger(request) {
+			if hasCompactionTrigger(request) || textCompactionIntent(request, nil) {
 				return true
 			}
 			existing = checkpointSet(request["input"])

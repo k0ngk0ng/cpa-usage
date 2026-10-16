@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"math"
 	"net/http"
 	"time"
@@ -70,6 +71,13 @@ func usageRequestKindsHandler(deps UsageDeps) gin.HandlerFunc {
 				_, err, _ := flights.Do(id, func() (any, error) {
 					return nil, discoverRequestKind(ctx, deps, id)
 				})
+				// A shared flight uses its first caller's context. If that caller
+				// navigated away, retry with this still-live caller's context.
+				if ctx.Err() == nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+					_, err, _ = flights.Do(id, func() (any, error) {
+						return nil, discoverRequestKind(ctx, deps, id)
+					})
+				}
 				if err != nil && ctx.Err() == nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 					return

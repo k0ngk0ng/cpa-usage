@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.8
+
+- Recognize Codex text compaction on `/v1/responses` through `request_kind: compaction` in turn metadata or the exact active checkpoint prompt, including per-request WebSocket metadata.
+- Show returned handoff summaries and the input submitted for summarization in Response, Final and session details, without claiming that every source message was replaced.
+- Reclassify old Normal/Unknown cache entries automatically after upgrading; preserve established Compact evidence.
+- Read complete request-log details without body truncation and retry discovery when another caller cancels shared work.
+- Add regressions and expand the reproducible browser E2E suite to 21 scenarios, including old-schema migration, large text summaries and mobile display.
+
 ## 0.4.7
 
 - Remove file-size limits and body truncation from Events request-type discovery so large conversation logs and compact triggers near the end are classified.

@@ -184,9 +184,13 @@ Common query params: `range=all|today|4h|8h|12h|24h|2d|3d|4d|5d|6d|7d|30d|custom
 
 ### Codex compaction logs
 
-Request logs recognize both `/responses/compact` and v2 `response.create`
-requests with `input[].type = "compaction_trigger"`. New `compaction` or
-`compaction_summary` output items also identify compaction. Replaying an existing
+Request logs recognize `/responses/compact`, v2 `response.create` requests with
+`input[].type = "compaction_trigger"`, and text compaction sent to `/v1/responses`.
+Text compaction is identified by `request_kind: "compaction"` in the
+`X-Codex-Turn-Metadata` header or `client_metadata["x-codex-turn-metadata"]`.
+The exact standard Codex checkpoint prompt in the last user input is also
+recognized. New `compaction` or `compaction_summary` output items identify
+compaction too. Replaying an existing
 checkpoint, configuring automatic compaction, or CPA's `is_compaction` session
 continuation flag alone does not identify a new compact request.
 
@@ -198,7 +202,14 @@ an encrypted summary. Missing history, `previous_response_id`, incomplete logs
 and automatic inline output deltas do not establish a complete compression range.
 Encrypted summaries remain opaque; readable summaries are shown when logged.
 
-WebSocket timeline sections are retained with size limits. Each compact exchange
+Text compaction can return an ordinary assistant message instead of a typed
+compaction item. Details show this as **Returned summary**, with **Input submitted
+for summarization** available to expand. The checkpoint instruction is excluded
+from that source input. This response does not establish which messages the
+client retained alongside the summary, so it is not treated as a full replacement
+transcript. A failed or incomplete response does not establish a completed summary.
+
+Request-log details read complete bodies and WebSocket timelines. Each compact exchange
 is labelled separately, and upstream-only results are identified. Events has a
 Request type column and mobile badges: `Compact`, `Compact in log`, `Normal` or
 `Unknown`. The list automatically inspects available request logs in the background;
@@ -211,8 +222,10 @@ Events loads cached types without waiting for log downloads, then discovers type
 in batches of up to eight IDs. Classification reads complete logs without a file
 size limit or body truncation. Each batch has a 12-second deadline, and at most two
 batches run concurrently. Refresh retries missing or incomplete evidence after a
-five-minute cooldown. SQLite retains established
-types across refreshes and restarts, even if the source log disappears; retention
+five-minute cooldown. Upgrading from older classification rules invalidates cached
+Normal/Unknown results so visible events are checked again immediately; established
+Compact evidence remains available. SQLite retains current classifications
+across refreshes and restarts, even if the source log disappears; retention
 cleanup removes the cache when no associated usage remains. Session-row badges
 still appear after their logs are opened and inspected.
 

@@ -45,6 +45,35 @@ try {
   results.push({case:`events-${id}`,passed:true});
  }
  browser("screenshot",`${dir}/events-large-logs.png`);
+ for(const [id,kind] of [["text-header","compact"],["text-body","compact"],["text-prompt","compact"],["text-failed","compact"],["text-replay","normal"]]) {
+  browser("wait","--fn",`document.querySelector('table [data-request-id="${id}"][data-request-kind="${kind}"]') !== null`);
+ }
+ results.push({case:"text-compaction-list-and-old-cache-upgrade",passed:true});
+ for(const id of ["text-header","text-body","text-prompt","text-failed","text-replay"]) {
+  browser("open",`http://127.0.0.1:18328/usage/events?range=all&request_id=${id}`);
+  browser("wait","--text","Request log");
+  browser("wait","--fn",'Array.from(document.querySelectorAll("[role=dialog] button")).some(button => button.textContent === "Final")');
+  for(const tab of ["Final","Response 200"]) {
+   browser("find","role","button","click","--name",tab,"--exact");
+   browser("wait","--fn",'document.querySelector("[role=dialog]") !== null');
+   const text=evaluate('document.querySelector("[role=dialog]").innerText');
+   if(id==="text-replay") assert(!text.includes("Compaction result"));
+   else if(id==="text-failed") assert(text.includes("No completed compaction result"));
+   else {
+    assert(text.includes("Compaction result")); assert(text.includes("Returned summary"));
+    assert(text.includes("Handoff summary: keep the tested changes."));
+    assert(text.includes("Input submitted for summarization"));
+    assert(!text.includes("No completed compaction result")); assert(!text.includes("Compacted / replaced input"));
+   }
+  }
+  if(id==="text-prompt") {
+   browser("click",'section[aria-label="Compaction result"] details:first-of-type summary');
+   browser("wait","--text","Old answer to compress");
+   assert(!evaluate('document.querySelector("section[aria-label=\\"Compaction result\\"] details:first-of-type").innerText').includes("You are performing a CONTEXT CHECKPOINT COMPACTION"));
+  }
+  browser("screenshot",`${dir}/${id}.png`);
+  results.push({case:id,passed:true});
+ }
  for(const id of ["legacy","v2","ws","failed","delta","replay"]) {
   browser("open",`http://127.0.0.1:18328/usage/events?range=all&request_id=${id}`);
   browser("set","viewport","1280","900");
@@ -83,6 +112,11 @@ try {
  assert(evaluate('document.documentElement.scrollWidth <= innerWidth'));
  browser("screenshot",`${dir}/mobile.png`);
  results.push({case:"mobile-session",passed:true});
+ browser("open","http://127.0.0.1:18328/usage/sessions?key=request:text-body");
+ browser("wait","--text","Returned summary");
+ assert(evaluate('document.body.innerText').includes("Handoff summary: keep the tested changes."));
+ browser("screenshot",`${dir}/text-summary-mobile.png`);
+ results.push({case:"text-summary-mobile-session",passed:true});
  browser("open","http://127.0.0.1:18328/usage/sessions?key=session:compact-e2e");
  browser("find","role","button","click","--name","Read request v2","--exact");
  browser("wait","--text","Compaction result");

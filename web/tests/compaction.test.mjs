@@ -106,3 +106,40 @@ test("upstream HTTP failure and WS disconnect are not successful compactions", (
   const [ws] = compactionReports(entry({},null,{response_body:"",websocket_timeline:timeline}));
   assert.equal(ws.completed,false);
 });
+
+// Text-compaction failure cases: metadata only in headers/client_metadata,
+// terminal plain-text summaries, failed/incomplete streams, old prompt replay,
+// forged substring matches, and incorrect full-transcript replacement claims.
+const checkpointPrompt = 'You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.\n\nInclude:\n- Current progress and key decisions made\n- Important context, constraints, or user preferences\n- What remains to be done (clear next steps)\n- Any critical data, examples, or references needed to continue\n\nBe concise, structured, and focused on helping the next LLM seamlessly continue the work.';
+const summarize = {role:'user',content:[{type:'input_text',text:checkpointPrompt}]};
+const summary = {type:'message',role:'assistant',content:[{type:'output_text',text:'## Handoff\nKeep the tested changes.'}]};
+test('Codex metadata identifies a completed plain-text summary without a checkpoint item', () => {
+  for (const e of [
+    entry({input:[user,answer,summarize]},completed([summary]),{headers:{'x-codex-turn-metadata':'{"request_kind":"compaction"}'}}),
+    entry({input:[user,answer,summarize],client_metadata:{'x-codex-turn-metadata':'{"request_kind":"compaction"}'}},completed([summary])),
+    entry({input:[user,answer,summarize],client_metadata:{'x-codex-turn-metadata':{request_kind:'compaction'}}},completed([summary])),
+  ]) {
+    const [r] = compactionReports(e);
+    assert(r); assert.equal(r.reason,'metadata'); assert.equal(r.textSummary,true); assert.equal(r.completed,true);
+    assert.deepEqual(r.output,[summary]); assert.deepEqual(r.input,[user,answer]);
+    assert.equal(r.comparisonAvailable,false); assert.deepEqual(r.replaced,[]); assert.deepEqual(r.retained,[]);
+  }
+});
+test('exact active checkpoint prompt is a fallback; historical prompts and handoff replay are not new compactions', () => {
+  assert.equal(compactionReports(entry({input:[user,summarize]},completed([summary])))[0]?.reason,'prompt');
+  for (const input of [[summarize,user],[{role:'user',content:'Explain: '+checkpointPrompt}],[{role:'user',content:'Another language model started to solve this problem and produced a summary of its thinking process.'}]]) {
+    assert.equal(compactionReports(entry({input},completed([answer]),{headers:{'X-Codex-Beta-Features':'remote_compaction_v2','X-Codex-Turn-Metadata':'{"request_kind":"turn"}'}})).length,0);
+  }
+});
+test('text summaries require a successful terminal event and readable assistant output', () => {
+  const request = {input:[user,summarize]};
+  for (const response of [{error:{message:'canceled'}},{type:'response.output_item.done',item:summary},completed([]),completed([{type:'reasoning',encrypted_content:'opaque'}])]) {
+    const [r] = compactionReports(entry(request,response)); assert(r); assert.equal(r.completed,false);
+  }
+  const [r] = compactionReports(entry(request,completed([summary]),{response_body_truncated:true})); assert.equal(r.completed,false);
+});
+test('shared websocket metadata is scoped to its request, not subsequent exchanges', () => {
+  const timeline=frame('request',{input:[user],client_metadata:{'x-codex-turn-metadata':'{"request_kind":"compaction"}'}})+frame('response',completed([summary]))+frame('request',{input:[summary,user]})+frame('response',completed([answer]));
+  const reports=compactionReports(entry({},null,{response_body:'',websocket_timeline:timeline}));
+  assert.equal(reports.length,1);assert.equal(reports[0].completed,true);assert.equal(reports[0].textSummary,true);
+});

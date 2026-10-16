@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -183,13 +184,17 @@ func usageEventLogHandler(deps UsageDeps) gin.HandlerFunc {
 			return
 		}
 		defer logFile.Close()
-		entry, err := eventLogReader(deps).ReadForDisplay(logFile.path, c.Request.URL.Path+"/asset")
+		// Intent can be at the end of a large input, and the summary in the
+		// terminal stream event. Details must use the same full log as discovery.
+		reader := *eventLogReader(deps)
+		reader.MaxBodyBytes = math.MaxInt64
+		entry, err := reader.ReadForDisplay(logFile.path, c.Request.URL.Path+"/asset")
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		kind, complete := cpa.RequestKindFromLog(entry)
 		if deps.Store != nil {
-			kind, complete := cpa.RequestKindFromLog(entry)
 			_ = deps.Store.SaveRequestKind(c.Request.Context(), storage.RequestKind{RequestID: requestID, Kind: kind, Complete: complete})
 			title, source := cpa.SessionLabelFromLog(entry)
 			if title != "" {

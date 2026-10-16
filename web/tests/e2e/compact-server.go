@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -24,6 +26,15 @@ func main() {
 		panic("COMPACT_E2E_DIR required")
 	}
 	must(os.MkdirAll(filepath.Join(dir, "logs"), 0700))
+	// Seed the exact pre-v0.4.8 cache schema and misclassification before opening
+	// the application, so migration and automatic reclassification run together.
+	old, err := sql.Open("sqlite", filepath.Join(dir, "usage.db"))
+	must(err)
+	_, err = old.Exec("CREATE TABLE request_log_kinds (request_id TEXT PRIMARY KEY, kind TEXT, complete NUMERIC, checked_at DATETIME)")
+	must(err)
+	_, err = old.Exec("INSERT INTO request_log_kinds VALUES (?, ?, ?, ?)", "text-header", "normal", true, time.Now())
+	must(err)
+	must(old.Close())
 	store, err := sqlite.Open(sqlite.Config{Path: filepath.Join(dir, "usage.db")})
 	must(err)
 	defer store.Close()
@@ -34,6 +45,9 @@ func main() {
 	done := `{"type":"response.completed","response":{"id":"resp-new","status":"completed","output":[` + user + `,` + checkpoint + `]}}`
 	input := `{"model":"codex-test","input":[` + user + `,` + answer + `,{"type":"compaction_trigger"}]}`
 	largeInput := `{"role":"user","content":"` + strings.Repeat("x", 9<<20) + `"}`
+	prompt, _ := json.Marshal("You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.\n\nInclude:\n- Current progress and key decisions made\n- Important context, constraints, or user preferences\n- What remains to be done (clear next steps)\n- Any critical data, examples, or references needed to continue\n\nBe concise, structured, and focused on helping the next LLM seamlessly continue the work.")
+	textInput := `{"input":[` + user + `,` + answer + `,{"role":"user","content":` + string(prompt) + `}]}`
+	textDone := `data: {"type":"response.completed","response":{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Handoff summary: keep the tested changes."}]}]}}`
 	frame := func(kind, body string) string {
 		return "Timestamp: 2026-10-16T10:00:00Z\nEvent: websocket." + kind + "\n" + body + "\n"
 	}
@@ -48,9 +62,17 @@ func main() {
 		{"large-compact", "/v1/responses", `{"input":[` + largeInput + `,{"type":"compaction_trigger"}]}`, output, ""},
 		{"large-output", "/v1/responses", `{"input":"hello"}`, `{"padding":"` + strings.Repeat("x", 9<<20) + `","output":[` + checkpoint + `]}`, ""},
 		{"canceled", "/v1/responses", `{"input":"hello"}`, "", ""},
+		{"text-header", "/v1/responses", `{"input":[` + largeInput + `,` + user + `]}`, ":" + strings.Repeat("x", 2<<20) + "\n\n" + textDone, ""},
+		{"text-body", "/v1/responses", `{"input":[` + user + `],"client_metadata":{"x-codex-turn-metadata":"{\"request_kind\":\"compaction\"}"}}`, textDone, ""},
+		{"text-prompt", "/v1/responses", textInput, textDone, ""},
+		{"text-failed", "/v1/responses", textInput, `{"error":{"message":"Compaction failed"}}`, ""},
+		{"text-replay", "/v1/responses", `{"input":[{"role":"user","content":"Another language model started to solve this problem and produced a summary of its thinking process. Handoff summary: keep the tested changes."},` + user + `]}`, `{"output":[` + answer + `]}`, ""},
 	}
 	for i, c := range cases {
 		body := "=== REQUEST INFO ===\nURL: " + c.endpoint + "\n=== REQUEST BODY ===\n" + c.request + "\n"
+		if c.id == "text-header" {
+			body = "=== REQUEST INFO ===\nURL: " + c.endpoint + "\n=== HEADERS ===\nX-Codex-Turn-Metadata: {\"request_kind\":\"compaction\"}\n=== REQUEST BODY ===\n" + c.request + "\n"
+		}
 		if c.ws != "" {
 			body += "=== WEBSOCKET TIMELINE ===\n" + c.ws
 		} else {

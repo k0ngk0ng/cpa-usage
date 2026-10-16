@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http/httptest"
 	"os"
@@ -84,6 +85,104 @@ func TestRequestKindDiscoveryIsBoundedCachedAndSeparateFromEvents(t *testing.T) 
 	protected.ServeHTTP(rr, httptest.NewRequest("POST", "/usage/api/v1/usage/events/request-kinds", strings.NewReader(`{"request_ids":["v2"]}`)))
 	if rr.Code != 401 {
 		t.Fatalf("unguarded discovery: %d", rr.Code)
+	}
+}
+
+// The real compact log exceeds the display body limit. Its completed summary
+// must remain available even when the terminal SSE event is beyond that limit.
+func TestTextCompactionDetailReadsCompleteResponse(t *testing.T) {
+	dir := t.TempDir()
+	log := "=== HEADERS ===\nX-Codex-Turn-Metadata: {\"request_kind\":\"compaction\"}\n=== REQUEST BODY ===\n{\"input\":\"" + strings.Repeat("history", 100) + "\"}\n=== RESPONSE ===\nStatus: 200\n\ndata: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"" + strings.Repeat("summary", 100) + "\"}]}]}}\n"
+	if err := os.WriteFile(filepath.Join(dir, "responses-text.log"), []byte(log), 0600); err != nil {
+		t.Fatal(err)
+	}
+	r := gin.New()
+	r.GET("/logs/:request_id", usageEventLogHandler(UsageDeps{LogReader: &cpa.LogReader{Dir: dir, MaxBodyBytes: 128}}))
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, httptest.NewRequest("GET", "/logs/text", nil))
+	var out struct {
+		Entry cpa.LogEntry `json:"entry"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if rr.Code != 200 || out.Entry.RequestTruncated || out.Entry.ResponseTruncated || !strings.Contains(out.Entry.ResponseBody, "response.completed") {
+		t.Fatalf("compact details truncated: status=%d request=%v response=%v", rr.Code, out.Entry.RequestTruncated, out.Entry.ResponseTruncated)
+	}
+}
+
+// A checkpoint prompt or body metadata can occur after the display limit, so
+// details must classify the full input even before a list lookup has run.
+func TestCompactionDetailReadsIntentBeyondDisplayLimit(t *testing.T) {
+	dir := t.TempDir()
+	log := "=== REQUEST BODY ===\n{\"input\":\"" + strings.Repeat("history", 100) + "\",\"client_metadata\":{\"x-codex-turn-metadata\":{\"request_kind\":\"compaction\"}}}\n=== RESPONSE ===\nStatus: 200\n\n{\"output\":[{\"role\":\"assistant\",\"content\":\"handoff summary\"}]}\n"
+	if err := os.WriteFile(filepath.Join(dir, "responses-text.log"), []byte(log), 0600); err != nil {
+		t.Fatal(err)
+	}
+	r := gin.New()
+	r.GET("/logs/:request_id", usageEventLogHandler(UsageDeps{LogReader: &cpa.LogReader{Dir: dir, MaxBodyBytes: 128}}))
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, httptest.NewRequest("GET", "/logs/text", nil))
+	var out struct {
+		Entry cpa.LogEntry `json:"entry"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	kind, _ := cpa.RequestKindFromLog(&out.Entry)
+	if rr.Code != 200 || kind != "compact" || out.Entry.RequestTruncated {
+		t.Fatalf("compact intent lost: status=%d kind=%s truncated=%v", rr.Code, kind, out.Entry.RequestTruncated)
+	}
+}
+
+type interruptedRequestKindStore struct {
+	storage.Store
+	calls   int
+	failure error
+}
+
+func (s *interruptedRequestKindStore) RequestKinds(ctx context.Context, ids []string) (map[string]storage.RequestKind, error) {
+	s.calls++
+	// The outer lookup succeeds, then discovery reports an interrupted shared
+	// operation while this HTTP caller's own context is still healthy.
+	if s.calls == 2 {
+		return nil, s.failure
+	}
+	return s.Store.RequestKinds(ctx, ids)
+}
+
+// Failure matrix: another caller cancels shared discovery, its deadline
+// expires, or discovery returns an unrelated error that must remain visible.
+func TestRequestKindDiscoveryRecoversForeignCancellation(t *testing.T) {
+	for _, failure := range []error{context.Canceled, context.DeadlineExceeded, errors.New("storage unavailable")} {
+		t.Run(failure.Error(), func(t *testing.T) {
+			s, err := sqlite.Open(sqlite.Config{Path: filepath.Join(t.TempDir(), "kinds.db")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			if _, _, err = s.InsertUsageEvents(context.Background(), []storage.UsageEvent{{EventKey: "text", RequestID: "text", Timestamp: time.Now()}}); err != nil {
+				t.Fatal(err)
+			}
+			store := &interruptedRequestKindStore{Store: s, failure: failure}
+			deps := UsageDeps{Store: store, LogDownloader: requestLogDownloaderFunc(func(_ context.Context, _ string, w io.Writer) (cpa.RequestLogMeta, error) {
+				n, err := io.WriteString(w, "=== HEADERS ===\nX-Codex-Turn-Metadata: {\"request_kind\":\"compaction\"}\n")
+				return cpa.RequestLogMeta{Size: int64(n)}, err
+			})}
+			r := gin.New()
+			r.POST("/kinds", usageRequestKindsHandler(deps))
+			rr := httptest.NewRecorder()
+			req := httptest.NewRequest("POST", "/kinds", strings.NewReader(`{"request_ids":["text"]}`))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(rr, req)
+			if failure == context.Canceled || failure == context.DeadlineExceeded {
+				if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"kind":"compact"`) {
+					t.Fatalf("healthy caller lost classification: %d %s", rr.Code, rr.Body.String())
+				}
+			} else if rr.Code != 500 || store.calls != 2 {
+				t.Fatalf("unrelated failure was retried or hidden: %d %s (%d calls)", rr.Code, rr.Body.String(), store.calls)
+			}
+		})
 	}
 }
 

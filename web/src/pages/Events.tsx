@@ -350,7 +350,7 @@ function RequestKindBadge({ event, kind, checking }: { event: UsageEventRecord; 
   const value = isCompactEndpoint(event.endpoint) ? "compact" : kind || event.request_kind;
   const positive = value === "compact" || value === "contains_compact";
   const label = value === "compact" ? "Compact" : value === "contains_compact" ? "Compact in log" : value === "normal" ? "Normal" : checking && !value && event.request_id ? "Checking…" : "Unknown";
-  const title = value === "compact" ? "Compaction request identified from the endpoint, trigger or new compaction output."
+  const title = value === "compact" ? "Compaction request identified from the endpoint, Codex metadata, checkpoint prompt, trigger or new compaction output."
     : value === "contains_compact" ? "This shared WebSocket log contains compaction. The log cannot attribute it to this individual usage record."
     : value === "normal" ? "The retained request and response contain no new compaction operation."
     : "Request type is not established yet. Logs may be missing or incomplete; Refresh retries available evidence.";
