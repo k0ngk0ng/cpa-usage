@@ -2,14 +2,15 @@
 // Failure matrix is in ../compaction.test.mjs; this exercises the complete
 // browser -> API -> real CPA-format log path without network mocks.
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync, openSync } from "node:fs";
+import { mkdirSync, mkdtempSync, renameSync, writeFileSync, openSync } from "node:fs";
 import { resolve } from "node:path";
 import assert from "node:assert/strict";
 
 const root = process.cwd();
 const dir = resolve(".cache/compact-e2e");
 for (const path of [dir, `${dir}/tmp`, `${dir}/sockets`]) mkdirSync(path,{recursive:true});
-const env = {...process.env, TMPDIR:`${dir}/tmp`, GOCACHE:resolve(".cache/go-build"), GOMODCACHE:resolve(".cache/go-mod"), COMPACT_E2E_DIR:dir,
+const fixtureDir = mkdtempSync(`${dir}/fixture-`);
+const env = {...process.env, TMPDIR:`${dir}/tmp`, GOCACHE:resolve(".cache/go-build"), GOMODCACHE:resolve(".cache/go-mod"), COMPACT_E2E_DIR:fixtureDir,
  AGENT_BROWSER_SOCKET_DIR:`${dir}/sockets`, AGENT_BROWSER_SESSION:"compact-e2e", AGENT_BROWSER_PROFILE:`${dir}/chrome`,
  AGENT_BROWSER_DOWNLOAD_PATH:`${dir}/downloads`, AGENT_BROWSER_SCREENSHOT_DIR:dir,
  XDG_CACHE_HOME:`${dir}/xdg-cache`, XDG_CONFIG_HOME:`${dir}/xdg-config`};
@@ -27,6 +28,16 @@ try {
  run("go",["build","-o",`${dir}/server`,"./web/tests/e2e/compact-server.go"]);
  server=spawn(`${dir}/server`,[],{env,stdio:["ignore",openSync(`${dir}/server.txt`,"w"),"inherit"]});
  for(let i=0;i<100;i++){try{if((await fetch("http://127.0.0.1:18328/healthz")).ok)break;}catch{} await new Promise(r=>setTimeout(r,100));}
+ browser("open","http://127.0.0.1:18328/usage/events?range=all");
+ browser("set","viewport","1440","900");
+ browser("wait","--fn",'document.querySelector(\'table [data-request-id="v2"][data-request-kind="compact"]\') !== null');
+ assert.equal(evaluate('document.querySelector("[role=dialog]") !== null'),false,"list detection must not open a log");
+ for(const [id,kind] of [["legacy","compact"],["failed","compact"],["delta","compact"],["replay","normal"],["ws","contains_compact"]]) {
+  browser("wait","--fn",`document.querySelector('table [data-request-id="${id}"][data-request-kind="${kind}"]') !== null`);
+ }
+ browser("screenshot",`${dir}/events-auto.png`);
+ writeFileSync(`${dir}/events-auto-snapshot.txt`,browser("snapshot"));
+ results.push({case:"events-automatic-classification-without-opening-logs",passed:true});
  for(const id of ["legacy","v2","ws","failed","delta","replay"]) {
   browser("open",`http://127.0.0.1:18328/usage/events?range=all&request_id=${id}`);
   browser("set","viewport","1280","900");
@@ -72,6 +83,12 @@ try {
  assert(evaluate('document.querySelector(\'[data-request-key="request:v2"] button\').innerText').includes("Compact"));
  browser("screenshot",`${dir}/session-badge.png`);
  results.push({case:"collapsed-session-badge",passed:true});
+ renameSync(`${fixtureDir}/logs`,`${fixtureDir}/saved-logs`);
+ browser("open","http://127.0.0.1:18328/usage/events?range=all");
+ browser("wait","--fn",'document.querySelector(\'article [data-request-id="v2"][data-request-kind="compact"]\') !== null');
+ assert.equal(evaluate('document.querySelector("[role=dialog]") !== null'),false);
+ browser("screenshot",`${dir}/events-cached-mobile.png`);
+ results.push({case:"events-cached-mobile-after-logs-unavailable",passed:true});
 } catch(error) {
  results.push({passed:false,error:error.stack}); process.exitCode=1;
  try { writeFileSync(`${dir}/failure-snapshot.txt`,browser("snapshot")); browser("screenshot",`${dir}/failure.png`); } catch {}

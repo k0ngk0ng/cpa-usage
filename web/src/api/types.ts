@@ -130,6 +130,7 @@ export interface UsageEventRecord {
   auth_type: string;
   endpoint: string;
   request_id: string;
+  request_kind?: RequestKindValue;
   trace_id: string;
   execution_id: string;
   timestamp_inferred: boolean;
@@ -165,6 +166,11 @@ export interface UsageEventRecord {
   request_service_tier: string;
   response_service_tier: string;
   cost: number;
+}
+
+export type RequestKindValue = "compact" | "contains_compact" | "normal" | "unknown";
+export interface RequestKindLookup {
+  items: Record<string, { request_id: string; kind: RequestKindValue }>;
 }
 
 export interface UsageEventsPage {

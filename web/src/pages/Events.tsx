@@ -3,14 +3,14 @@ import { useSearchParams } from "react-router-dom";
 import EventTraceLinks from "../components/EventTraceLinks";
 import FilterBar from "../components/FilterBar";
 import Table, { Column } from "../components/Table";
-import EventLogModal, { CompactBadge } from "../components/EventLogModal";
+import EventLogModal from "../components/EventLogModal";
 import { isCompactEndpoint } from "../lib/compaction";
 import { api } from "../api/client";
 import { todayFilter, useFilter } from "../hooks/useFilter";
 import { useRefreshTick } from "../lib/refresh";
 import { formatCost, formatLatency, formatNumber, formatTimestamp } from "../lib/utils";
 import type { FormEvent } from "react";
-import type { Filter, RangeKey, ResultFilter, UsageEventRecord, UsageEventsPage } from "../api/types";
+import type { Filter, RangeKey, ResultFilter, UsageEventRecord, UsageEventsPage, RequestKindValue } from "../api/types";
 
 const PAGE_SIZES = [20, 50, 100, 500, 1000];
 const RANGE_KEYS: RangeKey[] = ["all", "today", "4h", "8h", "12h", "24h", "2d", "3d", "4d", "5d", "6d", "7d", "30d", "custom"];
@@ -27,8 +27,15 @@ export default function EventsPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [selected, setSelected] = useState<UsageEventRecord | null>(null);
-  const [compactRequests, setCompactRequests] = useState<Set<string>>(() => new Set());
-  const markCompact = useCallback((id: string) => setCompactRequests(current => current.has(id) ? current : new Set([...current, id])), []);
+  const [requestKinds, setRequestKinds] = useState<Record<string, RequestKindValue>>({});
+  const [checkingKinds, setCheckingKinds] = useState(false);
+  const markCompact = useCallback((id: string) => {
+    // The log handler has already saved its evidence, including whether a
+    // websocket log is shared. Reuse that classification rather than guessing.
+    void api.requestKinds([id]).then(result => {
+      if (result.items[id]) setRequestKinds(current => ({ ...current, [id]: result.items[id].kind }));
+    }).catch(() => {});
+  }, []);
   const [autoOpenedRequestId, setAutoOpenedRequestId] = useState("");
   const tick = useRefreshTick();
 
@@ -66,6 +73,40 @@ export default function EventsPage() {
       cancelled = true;
     };
   }, [filter, page, pageSize, tick]);
+
+  useEffect(() => {
+    if (!data) return;
+    const controller = new AbortController();
+    const cached: Record<string, RequestKindValue> = {};
+    const pending = new Set<string>();
+    for (const event of data.Items) {
+      if (!event.request_id) continue;
+      const kind = isCompactEndpoint(event.endpoint) ? "compact" : event.request_kind;
+      if (kind) cached[event.request_id] = kind;
+      if (!kind || kind === "unknown") pending.add(event.request_id);
+    }
+    setRequestKinds(current => ({ ...current, ...cached }));
+    setCheckingKinds(pending.size > 0);
+    void (async () => {
+      const ids = [...pending];
+      // One batch at a time; results appear progressively without replacing
+      // the events list. Pagination and refresh abort old discovery requests.
+      for (let offset = 0; offset < ids.length; offset += 8) {
+        if (controller.signal.aborted) return;
+        const result = await api.requestKinds(ids.slice(offset, offset + 8), controller.signal);
+        if (controller.signal.aborted) return;
+        setRequestKinds(current => ({ ...current, ...Object.fromEntries(
+          Object.entries(result.items).map(([id, item]) => [id, item.kind]),
+        ) }));
+      }
+    })().catch(() => {
+      // Keep the list usable if log discovery is unavailable. Unknown is not
+      // a negative classification; Refresh retries after the server cooldown.
+    }).finally(() => {
+      if (!controller.signal.aborted) setCheckingKinds(false);
+    });
+    return () => controller.abort();
+  }, [data]);
 
   useEffect(() => {
     if (!filter.requestId) {
@@ -163,12 +204,16 @@ export default function EventsPage() {
       ),
     },
     {
+      header: "Request type",
+      className: "w-32",
+      cell: (event) => <RequestKindBadge event={event} kind={requestKinds[event.request_id]} checking={checkingKinds} />,
+    },
+    {
       header: "Endpoint",
       className: "w-36",
       cellClassName: "max-w-36",
       cell: (r) => (
         <span className="block truncate" title={r.endpoint}>
-          {(isCompactEndpoint(r.endpoint) || compactRequests.has(r.request_id)) && <CompactBadge />}{" "}
           {r.endpoint || "—"}
         </span>
       ),
@@ -260,13 +305,15 @@ export default function EventsPage() {
           {err}
         </div>
       )}
+      {checkingKinds && <p role="status" className="mb-2 text-xs text-muted">Identifying request types…</p>}
 
       <div className="xl:hidden">
         <MobileEventList
           rows={rows}
           loading={loading && !data}
           onSelect={setSelected}
-          compactRequests={compactRequests}
+          requestKinds={requestKinds}
+          checkingKinds={checkingKinds}
         />
       </div>
       <div className="hidden xl:block">
@@ -299,16 +346,30 @@ export default function EventsPage() {
   );
 }
 
+function RequestKindBadge({ event, kind, checking }: { event: UsageEventRecord; kind?: RequestKindValue; checking: boolean }) {
+  const value = isCompactEndpoint(event.endpoint) ? "compact" : kind || event.request_kind;
+  const positive = value === "compact" || value === "contains_compact";
+  const label = value === "compact" ? "Compact" : value === "contains_compact" ? "Compact in log" : value === "normal" ? "Normal" : checking && !value && event.request_id ? "Checking…" : "Unknown";
+  const title = value === "compact" ? "Compaction request identified from the endpoint, trigger or new compaction output."
+    : value === "contains_compact" ? "This shared WebSocket log contains compaction. The log cannot attribute it to this individual usage record."
+    : value === "normal" ? "The retained request and response contain no new compaction operation."
+    : "Request type is not established yet. Logs may be missing, incomplete or too large for background discovery; Refresh retries available evidence.";
+  return <span data-request-id={event.request_id} data-request-kind={value || "unknown"} title={title}
+    className={positive ? "inline-flex rounded bg-warn/10 px-1.5 py-0.5 text-[10px] font-semibold text-warn" : "text-[10px] text-muted"}>{label}</span>;
+}
+
 function MobileEventList({
   rows,
   loading,
   onSelect,
-  compactRequests,
+  requestKinds,
+  checkingKinds,
 }: {
   rows: UsageEventRecord[];
   loading: boolean;
   onSelect: (event: UsageEventRecord) => void;
-  compactRequests: Set<string>;
+  requestKinds: Record<string, RequestKindValue>;
+  checkingKinds: boolean;
 }) {
   if (loading) {
     return (
@@ -330,7 +391,8 @@ function MobileEventList({
         <MobileEventCard
           key={eventReactKey(event)}
           event={event}
-          compact={isCompactEndpoint(event.endpoint) || compactRequests.has(event.request_id)}
+          kind={requestKinds[event.request_id]}
+          checking={checkingKinds}
           onOpen={() => onSelect(event)}
         />
       ))}
@@ -338,7 +400,7 @@ function MobileEventList({
   );
 }
 
-function MobileEventCard({ event, onOpen, compact }: { event: UsageEventRecord; onOpen: () => void; compact: boolean }) {
+function MobileEventCard({ event, onOpen, kind, checking }: { event: UsageEventRecord; onOpen: () => void; kind?: RequestKindValue; checking: boolean }) {
   const canOpen = Boolean(event.request_id);
   const activate = () => {
     if (canOpen) onOpen();
@@ -377,7 +439,7 @@ function MobileEventCard({ event, onOpen, compact }: { event: UsageEventRecord; 
             Result only
           </span>
         )}
-        {compact && <CompactBadge />}
+        <RequestKindBadge event={event} kind={kind} checking={checking} />
         <time className="shrink-0 font-mono text-[10px] text-muted" dateTime={event.timestamp}>
           {compactTimestamp(event.timestamp)}
         </time>

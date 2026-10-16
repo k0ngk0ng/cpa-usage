@@ -181,6 +181,7 @@ type UsageEventRecord struct {
 	AuthType            string          `json:"auth_type"`
 	Endpoint            string          `json:"endpoint"`
 	RequestID           string          `json:"request_id"`
+	RequestKind         string          `json:"request_kind,omitempty"`
 	TraceID             string          `json:"trace_id"`
 	ExecutionID         string          `json:"execution_id"`
 	TimestampInferred   bool            `json:"timestamp_inferred"`

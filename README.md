@@ -164,6 +164,7 @@ All endpoints are mounted under `<APP_BASE_PATH>/api/v1`. Protected endpoints re
 | GET | `/usage/timelines/session-requests` | chronological request groups within a session snapshot; optional source-request focus |
 | GET | `/usage/events` | paginated raw events |
 | GET | `/usage/events/filters` | distinct models + sources |
+| POST | `/usage/events/request-kinds` | discover and cache request types for 1–8 retained `request_ids` |
 | GET | `/usage/credentials` | per-source success/failure rollup |
 | GET | `/auth-files` | cached CPA auth-files |
 | GET | `/provider-metadata` | cached provider catalog |
@@ -198,9 +199,21 @@ and automatic inline output deltas do not establish a complete compression range
 Encrypted summaries remain opaque; readable summaries are shown when logged.
 
 WebSocket timeline sections are retained with size limits. Each compact exchange
-is labelled separately, and upstream-only results are identified. V2 badges on
-event and session rows appear once their log is opened and inspected; usage queue
-metadata alone does not contain the trigger or output needed to classify them.
+is labelled separately, and upstream-only results are identified. Events has a
+Request type column and mobile badges: `Compact`, `Compact in log`, `Normal` or
+`Unknown`. The list automatically inspects available request logs in the background;
+opening a log is not required. `Compact in log` means a shared WebSocket transcript
+contains compaction that cannot be attributed to one usage record. `Unknown`
+means the available evidence is insufficient, including missing or incomplete logs.
+Usage queue metadata alone does not contain v2 triggers or output.
+
+Events loads cached types without waiting for log downloads, then discovers types
+in batches of up to eight IDs. Each batch has a 12-second deadline, each log is
+limited to 8 MiB, and at most two batches run concurrently. Refresh retries missing
+or incomplete evidence after a five-minute cooldown. SQLite retains established
+types across refreshes and restarts, even if the source log disappears; retention
+cleanup removes the cache when no associated usage remains. Session-row badges
+still appear after their logs are opened and inspected.
 
 Run the reproducible browser check from the repository root with
 `node web/tests/e2e/compact.mjs` (requires installed Go, web dependencies and

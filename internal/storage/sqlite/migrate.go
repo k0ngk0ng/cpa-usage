@@ -115,6 +115,7 @@ func allModels() []any {
 	return []any{
 		&usageEventModel{},
 		&requestLabelModel{},
+		&requestKindModel{},
 		&authFileModel{},
 		&providerMetadataModel{},
 		&modelPriceSettingModel{},

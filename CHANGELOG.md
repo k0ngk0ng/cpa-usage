@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.6
+
+- Show request types automatically in the Events list and mobile cards without opening logs, including Codex v2 compact requests.
+- Cache request types in SQLite and discover missing evidence through bounded background batches without blocking the Events query.
+- Distinguish shared WebSocket logs containing compaction from individually identified compact requests; keep insufficient evidence Unknown.
+- Extend the browser E2E check with automatic list classification and cached mobile badges after source logs become unavailable.
+
 ## 0.4.5
 
 - Recognize Codex v2 compaction triggers and new compaction output alongside the legacy `/responses/compact` endpoint; exclude replayed checkpoints and session continuation flags from request classification.

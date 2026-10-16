@@ -111,6 +111,27 @@ func usageEventsHandler(deps UsageDeps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		if deps.Store != nil {
+			ids := make([]string, 0, len(out.Items))
+			for _, item := range out.Items {
+				if item.RequestID != "" {
+					ids = append(ids, item.RequestID)
+				}
+			}
+			kinds, err := deps.Store.RequestKinds(c.Request.Context(), ids)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			for i := range out.Items {
+				item := &out.Items[i]
+				if cpa.IsCompactEndpoint(item.Endpoint) {
+					item.RequestKind = "compact"
+				} else if cached, ok := kinds[item.RequestID]; ok && !cached.CheckedAt.IsZero() {
+					item.RequestKind = cached.Kind
+				}
+			}
+		}
 		c.JSON(http.StatusOK, out)
 	}
 }
@@ -168,6 +189,8 @@ func usageEventLogHandler(deps UsageDeps) gin.HandlerFunc {
 			return
 		}
 		if deps.Store != nil {
+			kind, complete := cpa.RequestKindFromLog(entry)
+			_ = deps.Store.SaveRequestKind(c.Request.Context(), storage.RequestKind{RequestID: requestID, Kind: kind, Complete: complete})
 			title, source := cpa.SessionLabelFromLog(entry)
 			if title != "" {
 				_ = deps.Store.SaveRequestLabel(c.Request.Context(), storage.RequestLabel{RequestID: requestID, Title: title, Source: source, Complete: true})

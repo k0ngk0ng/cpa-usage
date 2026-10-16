@@ -44,6 +44,8 @@ type Store interface {
 	SessionLabel(ctx context.Context, sessionID string) (SessionLabel, error)
 	SessionLabelCandidates(ctx context.Context, sessionID string) ([]string, error)
 	SaveRequestLabel(ctx context.Context, label RequestLabel) error
+	RequestKinds(ctx context.Context, requestIDs []string) (map[string]RequestKind, error)
+	SaveRequestKind(ctx context.Context, kind RequestKind) error
 
 	// Pricing
 	ListUsedModels(ctx context.Context) ([]string, error)
