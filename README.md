@@ -182,6 +182,30 @@ Common query params: `range=all|today|4h|8h|12h|24h|2d|3d|4d|5d|6d|7d|30d|custom
 
 ## Architecture
 
+### Image generation and editing logs
+
+The Events request-log dialog recognizes the Images API independently of model
+names. **Request** shows the prompt, generation parameters, uploaded references
+and masks. **Response** shows each upstream attempt's images; **Final** groups
+the submitted input and the final client output. Headers and raw bodies remain
+expandable. Images display directly and can be downloaded.
+
+Multipart uploads are read as binary from the original log and served through
+the authenticated log-asset route, preserving their exact bytes. Both local logs
+and CPA management downloads/range requests work. JSON edits using `images`,
+data URLs, image URLs and `file_id` references are also recognized; file IDs
+without logged image content remain visible as references. Images API results
+support `data[].b64_json`, `data[].url` and image generation/edit SSE events.
+Partial output is identified when no completed image was retained.
+
+This follows the official [image generation guide](https://developers.openai.com/api/docs/guides/image-generation)
+and [image edits API](https://developers.openai.com/api/reference/resources/images/methods/edit).
+Run `node web/tests/e2e/images.mjs` for the reproducible browser check. Set
+`IMAGES_E2E_REMOTE=1` to exercise the CPA management path, and optionally set
+`CPA_IMAGE_SAMPLE_LOG=/path/to/log` to verify a real log. Results, screenshots,
+byte-for-byte image/download checks and fixtures are saved in
+`.cache/images-e2e/` (or its `remote/` subdirectory).
+
 ### Codex compaction logs
 
 Request logs recognize `/responses/compact`, v2 `response.create` requests with

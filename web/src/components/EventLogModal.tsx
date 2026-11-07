@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import EventTraceLinks from "./EventTraceLinks";
+import { ImageFinalView, ImageRequestView, ImageResponseView, isImageEndpoint } from "./ImageLogView";
 import { responseBodyContent } from "../lib/sessionContent";
 import { compactionReports, isCompactEndpoint, type CompactionReport } from "../lib/compaction";
 import clsx from "clsx";
@@ -416,6 +417,7 @@ function buildTabs(entry: EventLogEntry | null, event: UsageEventRecord): Tab[] 
   if (!entry) return [];
   const tabs: Tab[] = [];
   const compact = compactionReports(entry, event.endpoint);
+  const imageAPI = isImageEndpoint(entry.info?.URL || event.endpoint);
 
   tabs.push({
     id: "info",
@@ -452,7 +454,10 @@ function buildTabs(entry: EventLogEntry | null, event: UsageEventRecord): Tab[] 
       : undefined,
     render: () => (
       <Panel>
-        <div className="mb-3">
+        {imageAPI ? <>
+          <ImageRequestView entry={entry} />
+          <details className="mt-4"><summary className="cursor-pointer text-xs text-muted">Headers</summary><div className="mt-2"><KVList map={entry.headers} /></div></details>
+        </> : <><div className="mb-3">
           <Label>Headers</Label>
           <KVList map={entry.headers} />
         </div>
@@ -467,6 +472,7 @@ function buildTabs(entry: EventLogEntry | null, event: UsageEventRecord): Tab[] 
           </Label>
           <BodyView raw={entry.request_body} kind="request" />
         </div>
+        </>}
       </Panel>
     ),
   });
@@ -483,7 +489,7 @@ function buildTabs(entry: EventLogEntry | null, event: UsageEventRecord): Tab[] 
       badge,
       render: () => (
         <Panel>
-          <APIResponsesView attempts={responses} compactEntry={compact.length ? entry : undefined} endpoint={event.endpoint} />
+          <APIResponsesView attempts={responses} compactEntry={compact.length ? entry : undefined} endpoint={entry.info?.URL || event.endpoint} />
         </Panel>
       ),
     });
@@ -501,7 +507,7 @@ function buildTabs(entry: EventLogEntry | null, event: UsageEventRecord): Tab[] 
       : undefined,
     render: () => (
       <Panel>
-        {compact.length ? <CompactionView reports={compact} /> : <FinalChatView
+        {imageAPI ? <ImageFinalView entry={entry} response={finalResponseBody(entry)} /> : compact.length ? <CompactionView reports={compact} /> : <FinalChatView
           requestRaw={entry.request_body}
           responseRaw={finalResponseBody(entry)}
           responseTruncated={entry.response_body_truncated}
@@ -622,12 +628,12 @@ function APIResponseAttemptView({ attempt, compactEntry, endpoint }: { attempt: 
           </pre>
         </div>
       )}
-      {hasHeaders && (
+      {hasHeaders && (isImageEndpoint(endpoint) ? <details className="mb-3"><summary className="cursor-pointer text-xs text-muted">Headers</summary><div className="mt-2"><KVList map={attempt.headers} /></div></details> : (
         <div className="mb-3">
           <Label>Headers</Label>
           <KVList map={attempt.headers} />
         </div>
-      )}
+      ))}
       {(hasBody || (!attempt.error && !hasHeaders)) && (
         <div>
           <Label>
@@ -638,7 +644,7 @@ function APIResponseAttemptView({ attempt, compactEntry, endpoint }: { attempt: 
               </span>
             )}
           </Label>
-          {compact.length ? <CompactionView reports={compact} /> : <BodyView raw={attempt.body} kind="response" />}
+          {isImageEndpoint(endpoint) ? <ImageResponseView raw={attempt.body} /> : compact.length ? <CompactionView reports={compact} /> : <BodyView raw={attempt.body} kind="response" />}
         </div>
       )}
     </>

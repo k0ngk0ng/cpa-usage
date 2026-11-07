@@ -16,6 +16,9 @@ func RequestKindFromLog(entry *LogEntry) (kind string, complete bool) {
 	if IsCompactEndpoint(entry.Info["URL"]) {
 		return "compact", true
 	}
+	if IsImageEndpoint(entry.Info["URL"]) {
+		return "normal", true
+	}
 	if strings.TrimSpace(entry.WebsocketTimeline) != "" {
 		if websocketHasCompaction(entry.WebsocketTimeline) || websocketHasCompaction(entry.APIWebsocketTimeline) {
 			return "contains_compact", true

@@ -311,6 +311,10 @@ export interface EventLogEntry {
   headers: Record<string, string>;
   request_body: string;
   request_body_truncated: boolean;
+  image_request?: {
+    fields: { name: string; value: string }[];
+    files: { name: string; filename: string; mime_type?: string; url?: string }[];
+  };
   api_responses: APIResponseAttempt[];
   response_body: string;
   response_body_truncated: boolean;

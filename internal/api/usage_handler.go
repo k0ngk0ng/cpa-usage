@@ -128,6 +128,8 @@ func usageEventsHandler(deps UsageDeps) gin.HandlerFunc {
 				item := &out.Items[i]
 				if cpa.IsCompactEndpoint(item.Endpoint) {
 					item.RequestKind = "compact"
+				} else if cpa.IsImageEndpoint(item.Endpoint) {
+					item.RequestKind = "normal"
 				} else if cached, ok := kinds[item.RequestID]; ok && !cached.CheckedAt.IsZero() {
 					item.RequestKind = cached.Kind
 				}
@@ -223,7 +225,12 @@ func usageEventLogAssetHandler(deps UsageDeps) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid asset length"})
 			return
 		}
-		asset, mimeType, err := readEventLogAsset(c.Request.Context(), deps, requestID, offset, length)
+		encoding := c.Query("encoding")
+		if encoding != "" && encoding != "base64" && encoding != "raw" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid asset encoding"})
+			return
+		}
+		asset, mimeType, err := readEventLogAsset(c.Request.Context(), deps, requestID, offset, length, encoding)
 		if err != nil {
 			if errors.Is(err, cpa.ErrLogNotFound) || errors.Is(err, cpa.ErrInvalidRequestID) || errors.Is(err, errEventLogAssetFetch) {
 				writeEventLogResolveError(c, err)

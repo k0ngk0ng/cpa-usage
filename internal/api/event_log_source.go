@@ -119,7 +119,7 @@ func resolveLocalEventLog(deps UsageDeps, requestID string) (*eventLogHandle, er
 	}, nil
 }
 
-func readEventLogAsset(ctx context.Context, deps UsageDeps, requestID string, offset, length int64) ([]byte, string, error) {
+func readEventLogAsset(ctx context.Context, deps UsageDeps, requestID string, offset, length int64, encoding string) ([]byte, string, error) {
 	if err := cpa.ValidateInlineAssetRange(offset, length); err != nil {
 		return nil, "", err
 	}
@@ -127,7 +127,7 @@ func readEventLogAsset(ctx context.Context, deps UsageDeps, requestID string, of
 	localLog, err := resolveLocalEventLog(deps, requestID)
 	if err == nil {
 		defer localLog.Close()
-		return eventLogReader(deps).ReadInlineAsset(localLog.path, offset, length)
+		return eventLogReader(deps).ReadLogAsset(localLog.path, offset, length, encoding)
 	}
 	if !errors.Is(err, cpa.ErrLogNotFound) {
 		return nil, "", err
@@ -138,7 +138,7 @@ func readEventLogAsset(ctx context.Context, deps UsageDeps, requestID string, of
 		if _, err = downloader.DownloadRequestLogRange(ctx, requestID, offset, length, &encoded); err != nil {
 			return nil, "", fmt.Errorf("%w: %w", errEventLogAssetFetch, err)
 		}
-		return cpa.DecodeInlineAsset(encoded.Bytes())
+		return cpa.DecodeLogAsset(encoded.Bytes(), encoding)
 	}
 
 	remoteLog, err := resolveEventLog(ctx, deps, requestID)
@@ -146,7 +146,7 @@ func readEventLogAsset(ctx context.Context, deps UsageDeps, requestID string, of
 		return nil, "", fmt.Errorf("%w: %w", errEventLogAssetFetch, err)
 	}
 	defer remoteLog.Close()
-	return eventLogReader(deps).ReadInlineAsset(remoteLog.path, offset, length)
+	return eventLogReader(deps).ReadLogAsset(remoteLog.path, offset, length, encoding)
 }
 
 func eventLogReader(deps UsageDeps) *cpa.LogReader {

@@ -44,6 +44,17 @@ func (r *LogReader) ReadForDisplay(path, assetURL string) (*LogEntry, error) {
 		}
 		return nil, err
 	}
+	if IsImageEndpoint(entry.Info["URL"]) {
+		for key, value := range entry.Headers {
+			if strings.EqualFold(key, "content-type") {
+				entry.ImageRequest = multipartImageRequest(raw, bodyOffset, value, assetURL)
+				break
+			}
+		}
+		if entry.ImageRequest != nil {
+			return entry, nil
+		}
+	}
 	compacted, assetCount, ok := externalizeInlineAssets(raw, bodyOffset, assetURL)
 	if !ok || assetCount == 0 {
 		return entry, nil
@@ -65,6 +76,12 @@ func (r *LogReader) ReadForDisplay(path, assetURL string) (*LogEntry, error) {
 // ReadInlineAsset decodes one Base64 payload referenced by a compacted log
 // body. Offsets are absolute within the original immutable CPA log file.
 func (r *LogReader) ReadInlineAsset(path string, offset, encodedLength int64) ([]byte, string, error) {
+	return r.ReadLogAsset(path, offset, encodedLength, "base64")
+}
+
+// ReadLogAsset reads either an inline Base64 payload or a binary multipart
+// upload. Only recognized image/PDF bytes can be returned by the asset route.
+func (r *LogReader) ReadLogAsset(path string, offset, encodedLength int64, encoding string) ([]byte, string, error) {
 	if err := ValidateInlineAssetRange(offset, encodedLength); err != nil {
 		return nil, "", err
 	}
@@ -85,7 +102,21 @@ func (r *LogReader) ReadInlineAsset(path string, offset, encodedLength int64) ([
 	if _, err := io.ReadFull(io.NewSectionReader(f, offset, encodedLength), encoded); err != nil {
 		return nil, "", err
 	}
-	return DecodeInlineAsset(encoded)
+	return DecodeLogAsset(encoded, encoding)
+}
+
+func DecodeLogAsset(data []byte, encoding string) ([]byte, string, error) {
+	if encoding == "" || encoding == "base64" {
+		return DecodeInlineAsset(data)
+	}
+	if encoding != "raw" {
+		return nil, "", fmt.Errorf("unsupported asset encoding")
+	}
+	mimeType := inlineAssetMIME(data)
+	if mimeType == "" {
+		return nil, "", fmt.Errorf("payload is not a supported asset")
+	}
+	return data, mimeType, nil
 }
 
 // ValidateInlineAssetRange applies the same range bounds to local and remote

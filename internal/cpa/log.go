@@ -49,6 +49,7 @@ type LogEntry struct {
 	Headers                       map[string]string `json:"headers"`
 	RequestBody                   string            `json:"request_body"`
 	RequestTruncated              bool              `json:"request_body_truncated"`
+	ImageRequest                  *ImageRequest     `json:"image_request,omitempty"`
 	APIResponses                  []APIResponse     `json:"api_responses"`
 	ResponseBody                  string            `json:"response_body"`
 	ResponseTruncated             bool              `json:"response_body_truncated"`

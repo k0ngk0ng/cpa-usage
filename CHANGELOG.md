@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.9
+
+- Display Images API prompts, uploaded references/masks and generated images directly in the Events request-log dialog, with downloads and expandable raw content.
+- Preserve multipart image bytes through local or CPA management/range reads; recognize JSON edits, base64/URL results and partial/completed image streams.
+- Classify known Images API endpoints as Normal without opening logs, and add reproducible browser E2E coverage including an optional real-log sample.
+
 ## 0.4.8
 
 - Recognize Codex text compaction on `/v1/responses` through `request_kind: compaction` in turn metadata or the exact active checkpoint prompt, including per-request WebSocket metadata.
